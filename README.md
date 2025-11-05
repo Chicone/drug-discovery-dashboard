@@ -3,6 +3,48 @@
 This project is an interactive dashboard developed to support research in **computational drug discovery**, combining both **classical molecular modeling** and **AI-based methods**.  
 It provides a unified environment for molecular visualization, descriptor calculation, and property prediction to facilitate compound exploration and hypothesis testing.
 
+## 🚀 Installation
+
+1. Clone the repository  
+git clone https://github.com/yourusername/dd_dash.git  
+cd drug-discovery-dashboard
+
+2. Set up the backend (FastAPI)  
+It is recommended to use conda or venv for environment management.
+
+Using conda:  
+conda create -n drugdash python=3.10  
+conda activate drugdash  
+pip install -r requirements.txt  
+
+Or using pip directly:  
+python -m venv venv  
+source venv/bin/activate  (On Windows: venv\Scripts\activate)  
+pip install -r requirements.txt  
+
+Then start the FastAPI server:  
+uvicorn app.main:app --reload  
+
+The backend will be available at:  
+http://127.0.0.1:8000
+
+3. Set up the frontend (React)  
+Open a new terminal and go to the frontend directory:  
+cd frontend  
+npm install  
+npm start  
+
+The frontend will be available at:  
+http://localhost:3000
+
+4. Access the dashboard  
+Once both servers are running, open your browser and visit:  
+http://localhost:3000
+
+You should see the interactive drug discovery dashboard interface.
+
+---
+
 ## Features
 
 - 🧬 **3D Molecular Visualization** — render structures directly from SMILES using 3Dmol.js.  
@@ -31,3 +73,5 @@ This dashboard aims to:
 Developed by **Luis G. Camara, PhD**  
 Computational Chemist & Data Scientist  
 University of Geneva — Pharmaceutical Biochemistry Group
+
+
