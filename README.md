@@ -10,8 +10,8 @@ git clone https://github.com/Chicone/drug-discovery-dashboard.git
 cd drug-discovery-dashboard
 
 2. Set up the backend (FastAPI)  
-It is recommended to use conda or venv for environment management.
 
+It is recommended to use conda or venv for environment management.
 Using conda:  
 conda create -n drugdash python=3.10  
 conda activate drugdash  
