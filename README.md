@@ -15,7 +15,7 @@ It is recommended to use conda or venv for environment management.
 Using conda:  
 conda create -n drugdash python=3.10  
 conda activate drugdash  
-pip install -r requirements.txt  
+conda env create -f environment.yml
 
 Or using pip directly:  
 python -m venv venv  
