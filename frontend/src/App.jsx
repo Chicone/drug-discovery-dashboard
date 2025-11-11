@@ -1,150 +1,68 @@
-import { useState, useEffect } from "react";
-import MoleculeViewer from "./MoleculeViewer";
+import { useState } from "react";
+import {
+  AppBar,
+  Toolbar,
+  Typography,
+  Tabs,
+  Tab,
+  Box,
+  Container,
+} from "@mui/material";
 
-function App() {
-  const [smiles, setSmiles] = useState("");
-  const [data, setData] = useState(null);
-  const [error, setError] = useState(null);
-  const [RDKit, setRDKit] = useState(null);
+// ✅ Make sure every one of these files exists:
+import MolecularDesign from "./pages/MolecularDesign.jsx";
+import Docking from "./pages/Docking.jsx";
+import AdmetAnalysis from "./pages/AdmetAnalysis.jsx";
+import Library from "./pages/Library.jsx";
+import Reports from "./pages/Reports.jsx";
+import MolecularDynamics from "./pages/MolecularDynamics.jsx";
 
-  useEffect(() => {
-    const loadRDKit = async () => {
-      const RDKitModule = await window.initRDKitModule();
-      setRDKit(RDKitModule);
-    };
-    if (!window.initRDKitModule) {
-      // dynamically load RDKit.js script
-      const script = document.createElement("script");
-      script.src = "https://unpkg.com/@rdkit/rdkit/dist/RDKit_minimal.js";
-      script.onload = loadRDKit;
-      document.body.appendChild(script);
-    } else {
-      loadRDKit();
-    }
-  }, []);
+export default function App() {
+  const [tab, setTab] = useState(0);
 
-  const fetchProperties = async () => {
-    setError(null);
-    try {
-      const res = await fetch(`/api/properties?smiles=${encodeURIComponent(smiles)}`);
-      const json = await res.json();
-      if (json.error) setError(json.error);
-      else setData(json);
-    } catch (e) {
-      setError("Could not connect to backend");
-    }
-  };
-
-  const renderMolecule = () => {
-    if (!RDKit || !smiles) return null;
-    try {
-      const mol = RDKit.get_mol(smiles);
-      const svg = mol.get_svg();
-      mol.delete();
-      return (
-        <div
-          dangerouslySetInnerHTML={{ __html: svg }}
-          style={{ border: "1px solid #ccc", marginTop: "1rem" }}
-        />
-      );
-    } catch {
-      return <p style={{ color: "red" }}>Invalid SMILES for visualization</p>;
+  const render = () => {
+    switch (tab) {
+      case 0:
+        return <MolecularDesign />;
+      case 1:
+        return <Docking />;
+      case 2:
+        return <AdmetAnalysis />;
+      case 3:
+        return <Library />;
+      case 4:
+        return <Reports />;
+      case 5:
+        return <MolecularDynamics />;
+      default:
+        return null;
     }
   };
 
-return (
-  <div style={{
-    padding: "2rem",
-    fontFamily: "sans-serif",
-    color: "white",
-    backgroundColor: "#121212",
-    minHeight: "100vh",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-  }}>
-    <h1 style={{ marginBottom: "1rem" }}>Drug Discovery Dashboard</h1>
+  return (
+    <Box sx={{ background: "#121212", color: "white", minHeight: "100vh" }}>
+      <AppBar position="static" sx={{ background: "#1f1f1f" }}>
+        <Toolbar>
+          <Typography variant="h6" sx={{ flexGrow: 1 }}>
+            🧬 Drug Discovery Dashboard
+          </Typography>
+          <Tabs
+            value={tab}
+            onChange={(_, v) => setTab(v)}
+            textColor="inherit"
+            indicatorColor="secondary"
+          >
+            <Tab label="Molecular Design" />
+            <Tab label="Docking" />
+            <Tab label="ADMET" />
+            <Tab label="Library" />
+            <Tab label="Reports" />
+            <Tab label="Molecular Dynamics" />
+          </Tabs>
+        </Toolbar>
+      </AppBar>
 
-    <div style={{ display: "flex", gap: "0.5rem" }}>
-      <input
-        type="text"
-        placeholder="Enter SMILES (e.g. CCO)"
-        value={smiles}
-        onChange={(e) => setSmiles(e.target.value)}
-        style={{
-          width: "300px",
-          padding: "0.5rem",
-          borderRadius: "4px",
-          border: "1px solid #555",
-          color: "#fff",
-          background: "#222",
-        }}
-      />
-      <input
-          type="file"
-          accept=".smi,.txt"
-          onChange={(e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = (ev) => {
-              const text = ev.target.result;
-              const firstLine = text.split("\n").find((l) => l.trim().length > 0);
-              if (firstLine) {
-                const smilesFromFile = firstLine.split(/\s+/)[0]; // get first token
-                setSmiles(smilesFromFile);
-              }
-            };
-            reader.readAsText(file);
-          }}
-          style={{ marginTop: "1rem", display: "block" }}
-        />
-      <button
-        onClick={fetchProperties}
-        style={{
-          padding: "0.5rem 1rem",
-          background: "#444",
-          border: "none",
-          color: "white",
-          borderRadius: "4px",
-          cursor: "pointer",
-        }}
-      >
-        Analyze
-      </button>
-    </div>
-
-    {error && <p style={{ color: "red" }}>{error}</p>}
-
-    {data && (
-      <div style={{ marginTop: "2rem", textAlign: "center" }}>
-        <table
-          border="1"
-          cellPadding="5"
-          style={{
-            margin: "0 auto",
-            borderCollapse: "collapse",
-            minWidth: "250px",
-          }}
-        >
-          <tbody>
-            {Object.entries(data).map(([key, value]) => (
-              <tr key={key}>
-                <td><strong>{key}</strong></td>
-                <td>{value}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        {/* Viewer container */}
-        <div style={{ marginTop: "1.5rem", display: "flex", justifyContent: "center" }}>
-          <MoleculeViewer smiles={smiles} />
-        </div>
-      </div>
-    )}
-  </div>
-);
+      <Container sx={{ py: 4 }}>{render()}</Container>
+    </Box>
+  );
 }
-
-export default App;
