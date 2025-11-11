@@ -2,12 +2,19 @@ import { Paper, Typography, Button, Stack } from "@mui/material";
 
 function MolecularDynamics() {
   return (
-    <Paper sx={{ p: 3, background: "#1e1e1e" }}>
+    <Paper
+          sx={{
+            p: 3,
+            background: "#1e1e1e",
+            maxWidth: "100%",
+            overflowX: "hidden",
+          }}
+        >
       <Typography variant="h5" gutterBottom>
         💫 Molecular Dynamics
       </Typography>
       <Typography variant="body1" sx={{ mb: 2 }}>
-        This module will allow you to visualize and analyze molecular dynamics simulations.
+        This module will allow you to visualize and analyze molecular dynamics simulations.<br />
         You’ll be able to explore atomistic motions, ligand stability, and conformational
         changes over time.
       </Typography>
