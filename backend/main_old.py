@@ -1,5 +1,5 @@
 # -------------------------------------------------------------
-#  main.py  —  Backend for the Drug Discovery Dashboard
+#  main_old.py  —  Backend for the Drug Discovery Dashboard
 #  ------------------------------------------------------------
 #  Responsibilities:
 #   • Serve the static frontend (HTML + JS) under /app
