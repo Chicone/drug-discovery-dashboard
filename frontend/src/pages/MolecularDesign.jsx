@@ -1,5 +1,14 @@
 import { useState, useEffect } from "react";
-import MoleculeViewer from "../MoleculeViewer"; // updated relative path
+import {
+  Box,
+  Paper,
+  Typography,
+  TextField,
+  Button,
+  Stack,
+  Divider,
+} from "@mui/material";
+import MoleculeViewer from "../MoleculeViewer";
 
 function MolecularDesign() {
   const [smiles, setSmiles] = useState("");
@@ -13,7 +22,6 @@ function MolecularDesign() {
       setRDKit(RDKitModule);
     };
     if (!window.initRDKitModule) {
-      // dynamically load RDKit.js script
       const script = document.createElement("script");
       script.src = "https://unpkg.com/@rdkit/rdkit/dist/RDKit_minimal.js";
       script.onload = loadRDKit;
@@ -25,6 +33,7 @@ function MolecularDesign() {
 
   const fetchProperties = async () => {
     setError(null);
+    setData(null);
     try {
       const res = await fetch(`/api/properties?smiles=${encodeURIComponent(smiles)}`);
       const json = await res.json();
@@ -42,109 +51,146 @@ function MolecularDesign() {
       const svg = mol.get_svg();
       mol.delete();
       return (
-        <div
+        <Box
           dangerouslySetInnerHTML={{ __html: svg }}
-          style={{ border: "1px solid #ccc", marginTop: "1rem" }}
+          sx={{
+            border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: 1,
+            mt: 2,
+            p: 1,
+            backgroundColor: "#1a1a1a",
+          }}
         />
       );
     } catch {
-      return <p style={{ color: "red" }}>Invalid SMILES for visualization</p>;
+      return (
+        <Typography variant="body2" color="error" sx={{ mt: 1 }}>
+          Invalid SMILES for visualization
+        </Typography>
+      );
     }
   };
 
-return (
-  <div style={{
-    padding: "2rem",
-    fontFamily: "sans-serif",
-    color: "white",
-    backgroundColor: "#121212",
-    minHeight: "100vh",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-  }}>
-    <h1 style={{ marginBottom: "1rem" }}>Drug Discovery Dashboard</h1>
+  return (
+    <Paper
+      sx={{
+        p: 3,
+        backgroundColor: "#1e1e1e",
+        color: "white",
+        maxWidth: "100%",
+        overflowX: "hidden",
+      }}
+    >
+      <Typography variant="h5" gutterBottom>
+        🧪 Molecular Design
+      </Typography>
 
-    <div style={{ display: "flex", gap: "0.5rem" }}>
-      <input
-        type="text"
-        placeholder="Enter SMILES (e.g. CCO)"
-        value={smiles}
-        onChange={(e) => setSmiles(e.target.value)}
-        style={{
-          width: "300px",
-          padding: "0.5rem",
-          borderRadius: "4px",
-          border: "1px solid #555",
-          color: "#fff",
-          background: "#222",
-        }}
-      />
-      <input
-          type="file"
-          accept=".smi,.txt"
-          onChange={(e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = (ev) => {
-              const text = ev.target.result;
-              const firstLine = text.split("\n").find((l) => l.trim().length > 0);
-              if (firstLine) {
-                const smilesFromFile = firstLine.split(/\s+/)[0]; // get first token
-                setSmiles(smilesFromFile);
-              }
-            };
-            reader.readAsText(file);
+      <Typography variant="body2" sx={{ mb: 2, color: "#aaa" }}>
+        Enter a SMILES string or upload a .smi / .txt file to analyze molecular
+        properties and visualize the structure.
+      </Typography>
+
+      <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center">
+        <TextField
+          variant="outlined"
+          label="SMILES"
+          placeholder="e.g. CCO"
+          size="small"
+          value={smiles}
+          onChange={(e) => setSmiles(e.target.value)}
+          sx={{
+            width: { xs: "100%", sm: 300 },
+            input: { color: "white" },
+            label: { color: "#aaa" },
+            "& .MuiOutlinedInput-root": {
+              "& fieldset": { borderColor: "#555" },
+              "&:hover fieldset": { borderColor: "#888" },
+              "&.Mui-focused fieldset": { borderColor: "white" },
+            },
           }}
-          style={{ marginTop: "1rem", display: "block" }}
         />
-      <button
-        onClick={fetchProperties}
-        style={{
-          padding: "0.5rem 1rem",
-          background: "#444",
-          border: "none",
-          color: "white",
-          borderRadius: "4px",
-          cursor: "pointer",
-        }}
-      >
-        Analyze
-      </button>
-    </div>
 
-    {error && <p style={{ color: "red" }}>{error}</p>}
-
-    {data && (
-      <div style={{ marginTop: "2rem", textAlign: "center" }}>
-        <table
-          border="1"
-          cellPadding="5"
-          style={{
-            margin: "0 auto",
-            borderCollapse: "collapse",
-            minWidth: "250px",
-          }}
+        <Button
+          variant="contained"
+          component="label"
+          color="secondary"
+          sx={{ whiteSpace: "nowrap" }}
         >
-          <tbody>
-            {Object.entries(data).map(([key, value]) => (
-              <tr key={key}>
-                <td><strong>{key}</strong></td>
-                <td>{value}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+          Upload File
+          <input
+            type="file"
+            accept=".smi,.txt"
+            hidden
+            onChange={(e) => {
+              const file = e.target.files[0];
+              if (!file) return;
+              const reader = new FileReader();
+              reader.onload = (ev) => {
+                const text = ev.target.result;
+                const firstLine = text.split("\n").find((l) => l.trim().length > 0);
+                if (firstLine) {
+                  const smilesFromFile = firstLine.split(/\s+/)[0];
+                  setSmiles(smilesFromFile);
+                }
+              };
+              reader.readAsText(file);
+            }}
+          />
+        </Button>
 
-        {/* Viewer container */}
-        <div style={{ marginTop: "1.5rem", display: "flex", justifyContent: "center" }}>
-          <MoleculeViewer smiles={smiles} />
-        </div>
-      </div>
-    )}
-  </div>
-);
+        <Button
+          variant="contained"
+          color="primary"
+          onClick={fetchProperties}
+          sx={{ whiteSpace: "nowrap" }}
+        >
+          Analyze
+        </Button>
+      </Stack>
+
+      {error && (
+        <Typography color="error" sx={{ mt: 2 }}>
+          {error}
+        </Typography>
+      )}
+
+      {data && (
+        <Box sx={{ mt: 4 }}>
+          <Divider sx={{ mb: 2, borderColor: "rgba(255,255,255,0.1)" }} />
+          <Typography variant="h6" gutterBottom>
+            Molecular Properties
+          </Typography>
+          <Box
+            component="table"
+            sx={{
+              borderCollapse: "collapse",
+              "& td, & th": {
+                border: "1px solid rgba(255,255,255,0.1)",
+                padding: "6px 10px",
+              },
+              "& th": { color: "#ccc" },
+            }}
+          >
+            <tbody>
+              {Object.entries(data).map(([key, value]) => (
+                <tr key={key}>
+                  <td>
+                    <strong>{key}</strong>
+                  </td>
+                  <td>{value}</td>
+                </tr>
+              ))}
+            </tbody>
+          </Box>
+
+          <Box sx={{ mt: 3, textAlign: "center" }}>
+            {renderMolecule()}
+            <MoleculeViewer smiles={smiles} />
+          </Box>
+        </Box>
+      )}
+    </Paper>
+  );
 }
 
 export default MolecularDesign;
