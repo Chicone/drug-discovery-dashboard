@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.sqlite3
+*.egg-info/
+.env
+venv/
+.env/
+.venv/
+.DS_Store
+
+# IDEs
+.idea/
+.vscode/
+*.iml
+
+# Node / React
+node_modules/
+dist/
+build/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+
+# Frontend cache
+*.local
+*.cache
+*.log
+
+# Coverage / test
+coverage/
+*.pytest_cache/
+.pytest_cache/
+
