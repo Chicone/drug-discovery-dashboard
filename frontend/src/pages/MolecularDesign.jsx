@@ -7,6 +7,7 @@ import {
   Button,
   Stack,
   Divider,
+  LinearProgress,
 } from "@mui/material";
 import MoleculeViewer from "../MoleculeViewer";
 
@@ -15,6 +16,7 @@ function MolecularDesign() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [RDKit, setRDKit] = useState(null);
+  const [molName, setMolName] = useState("");
 
   useEffect(() => {
     const loadRDKit = async () => {
@@ -123,17 +125,20 @@ function MolecularDesign() {
             hidden
             onChange={(e) => {
               const file = e.target.files[0];
-              if (!file) return;
-              const reader = new FileReader();
-              reader.onload = (ev) => {
-                const text = ev.target.result;
-                const firstLine = text.split("\n").find((l) => l.trim().length > 0);
-                if (firstLine) {
-                  const smilesFromFile = firstLine.split(/\s+/)[0];
-                  setSmiles(smilesFromFile);
-                }
-              };
-              reader.readAsText(file);
+if (!file) return;
+const reader = new FileReader();
+reader.onload = (ev) => {
+  const text = ev.target.result;
+  const firstLine = text.split("\n").find((l) => l.trim().length > 0);
+  if (firstLine) {
+    const smilesFromFile = firstLine.split(/\s+/)[0];
+    setSmiles(smilesFromFile);
+    setMolName(file.name.replace(/\.[^/.]+$/, "")); // 👈 use filename as molecule name
+  }
+};
+reader.readAsText(file);
+
+
             }}
           />
         </Button>
@@ -160,33 +165,166 @@ function MolecularDesign() {
           <Typography variant="h6" gutterBottom>
             Molecular Properties
           </Typography>
+
+          {/* Unified rectangular layout */}
           <Box
-            component="table"
             sx={{
-              borderCollapse: "collapse",
-              "& td, & th": {
-                border: "1px solid rgba(255,255,255,0.1)",
-                padding: "6px 10px",
-              },
-              "& th": { color: "#ccc" },
+              mt: 3,
+              display: "flex",
+              flexDirection: { xs: "column", md: "row" },
+              alignItems: "stretch",
+              justifyContent: "center",
+              border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: 2,
+              overflow: "hidden",
             }}
           >
-            <tbody>
-              {Object.entries(data).map(([key, value]) => (
-                <tr key={key}>
-                  <td>
-                    <strong>{key}</strong>
-                  </td>
-                  <td>{value}</td>
-                </tr>
-              ))}
-            </tbody>
+            {/* LEFT: 2D + properties + QED bar */}
+            <Box
+              sx={{
+                flex: 1,
+                display: "flex",
+                flexDirection: "column",
+                justifyContent: "flex-start",
+                alignItems: "center",
+                p: 2,
+                borderRight: {
+                  xs: "none",
+                  md: "1px solid rgba(255,255,255,0.08)",
+                },
+                boxSizing: "border-box",
+                gap: 2,
+              }}
+            >
+            {molName && (
+          <Typography
+            variant="h6" // slightly larger than subtitle1
+            sx={{
+              fontWeight: 700,
+              color: "primary.main",
+              mb: 1,
+              letterSpacing: 0.8,
+              textTransform: "uppercase", // 👈 converts to all caps
+            }}
+          >
+            {molName}
+          </Typography>
+        )}
+
+              {renderMolecule()}
+
+              {/* Properties table (without QED) */}
+              <Box
+                component="table"
+                sx={{
+                  fontSize: "0.9rem",
+                  borderCollapse: "collapse",
+                  width: "100%",
+                  maxWidth: 320,
+                  "& td, & th": {
+                    border: "1px solid rgba(255,255,255,0.1)",
+                    padding: "4px 6px",
+                  },
+                  "& th": { color: "#ccc" },
+                }}
+              >
+                <tbody>
+                  {Object.entries(data)
+                    .filter(([key]) => !["insights", "QED"].includes(key))
+                    .map(([key, value]) => (
+                      <tr key={key}>
+                        <td>
+                          <strong>{key}</strong>
+                        </td>
+                        <td>{value}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </Box>
+
+              {/* QED score bar */}
+              {data?.QED !== undefined && (
+                <Box sx={{ width: "100%", maxWidth: 320, mt: 1 }}>
+                  <Typography
+                    variant="subtitle2"
+                    sx={{ color: "primary.main", fontWeight: 600, mb: 0.5 }}
+                  >
+                    QED Score
+                  </Typography>
+                  <LinearProgress
+                    variant="determinate"
+                    value={data.QED * 100}
+                    sx={{
+                      height: 8,
+                      borderRadius: 2,
+                      "& .MuiLinearProgress-bar": {
+                        backgroundColor:
+                          data.QED > 0.7
+                            ? "#4caf50"
+                            : data.QED > 0.4
+                            ? "#ffb300"
+                            : "#f44336",
+                      },
+                    }}
+                  />
+                  <Typography
+                    variant="body2"
+                    sx={{ color: "text.secondary", mt: 0.5, fontSize: "0.9rem" }}
+                  >
+                    {data.QED.toFixed(2)}{" "}
+                    {data.QED > 0.7
+                      ? "– Highly drug-like"
+                      : data.QED > 0.4
+                      ? "– Moderately drug-like"
+                      : "– Low drug-likeness"}
+                  </Typography>
+                </Box>
+              )}
+            </Box>
+
+            {/* RIGHT: 3D Viewer */}
+            <Box
+              sx={{
+                flex: 1.2,
+                display: "flex",
+                justifyContent: "center",
+                alignItems: "center",
+                p: 2,
+                boxSizing: "border-box",
+              }}
+            >
+              <MoleculeViewer smiles={smiles} />
+            </Box>
           </Box>
 
-          <Box sx={{ mt: 3, textAlign: "center" }}>
-            {renderMolecule()}
-            <MoleculeViewer smiles={smiles} />
-          </Box>
+          {/* Design Insights BELOW the rectangle */}
+          {data?.insights && (
+            <Box
+              sx={{
+                mt: 3,
+                background: "rgba(255,255,255,0.05)",
+                borderRadius: 1,
+                border: "1px solid rgba(255,255,255,0.1)",
+                p: 2,
+              }}
+            >
+              <Typography
+                variant="h6"
+                sx={{ fontWeight: 600, mb: 1, color: "primary.main" }}
+              >
+                Design Insights
+              </Typography>
+              {data.insights.map((line, i) => (
+                <Typography
+                  key={i}
+                  variant="body2"
+                  sx={{ color: "text.secondary", mb: 0.5, fontSize: "0.9rem" }}
+                >
+                  • {line}
+                </Typography>
+              ))}
+            </Box>
+          )}
         </Box>
       )}
     </Paper>

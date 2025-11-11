@@ -109,9 +109,9 @@ export default function App() {
               </Typography>
               <Typography
                 variant="caption"
-                sx={{ color: "text.secondary", letterSpacing: 1.5 }}
+                sx={{ color: "text.secondary", letterSpacing: 0.8 }}
               >
-                UNIGE · Pharmaceutical Sciences
+                UNIGE · Pharmaceutical Biochemistry
               </Typography>
             </Box>
           </Box>
