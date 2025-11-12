@@ -151,3 +151,26 @@ def mol3d(smiles: str):
     AllChem.EmbedMolecule(mol, randomSeed=0xf00d)
     mol_block = Chem.MolToMolBlock(mol)
     return Response(mol_block, media_type="text/plain")
+
+
+from fastapi import UploadFile, File
+import os
+
+
+@app.post("/api/upload_pdb")
+async def upload_pdb(file: UploadFile = File(...)):
+    path = f"uploaded_structures/{file.filename}"
+    os.makedirs("uploaded_structures", exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(await file.read())
+    return {"filename": file.filename}
+
+
+@app.get("/api/fetch_pdb")
+def fetch_pdb(pdb_id: str):
+    import requests
+    url = f"https://files.rcsb.org/view/{pdb_id}.pdb"
+    r = requests.get(url)
+    if r.status_code != 200:
+        return {"error": "PDB not found"}
+    return {"pdb": r.text}
