@@ -17,6 +17,7 @@ function MolecularDesign() {
   const [error, setError] = useState(null);
   const [RDKit, setRDKit] = useState(null);
   const [molName, setMolName] = useState("");
+  const [pdbFile, setPdbFile] = useState(null); // 👈 new
 
   useEffect(() => {
     const loadRDKit = async () => {
@@ -34,6 +35,7 @@ function MolecularDesign() {
   }, []);
 
   const fetchProperties = async () => {
+    if (pdbFile) return; // 👈 skip property fetch for PDBs
     setError(null);
     setData(null);
     try {
@@ -47,7 +49,7 @@ function MolecularDesign() {
   };
 
   const renderMolecule = () => {
-    if (!RDKit || !smiles) return null;
+    if (!RDKit || !smiles || pdbFile) return null; // 👈 hide 2D when PDB
     try {
       const mol = RDKit.get_mol(smiles);
       const svg = mol.get_svg();
@@ -88,9 +90,11 @@ function MolecularDesign() {
       </Typography>
 
       <Typography variant="body2" sx={{ mb: 2, color: "#aaa" }}>
-        Enter a SMILES string or upload a .smi / .txt file to analyze molecular
-        properties and visualize the structure.
+      You can <strong>type a SMILES string</strong> directly below, or
+       <strong> upload a file</strong> — either a <code>.smi</code> / <code>.txt</code> file
+      containing a SMILES, or a <code>.pdb</code> structure file for 3D visualization.
       </Typography>
+
 
       <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center">
         <TextField
@@ -99,7 +103,10 @@ function MolecularDesign() {
           placeholder="e.g. CCO"
           size="small"
           value={smiles}
-          onChange={(e) => setSmiles(e.target.value)}
+          onChange={(e) => {
+            setSmiles(e.target.value);
+            setPdbFile(null); // clear PDB if user starts typing SMILES
+          }}
           sx={{
             width: { xs: "100%", sm: 300 },
             input: { color: "white" },
@@ -121,24 +128,36 @@ function MolecularDesign() {
           Upload File
           <input
             type="file"
-            accept=".smi,.txt"
+            accept=".smi,.txt,.pdb"
             hidden
             onChange={(e) => {
               const file = e.target.files[0];
-if (!file) return;
-const reader = new FileReader();
-reader.onload = (ev) => {
-  const text = ev.target.result;
-  const firstLine = text.split("\n").find((l) => l.trim().length > 0);
-  if (firstLine) {
-    const smilesFromFile = firstLine.split(/\s+/)[0];
-    setSmiles(smilesFromFile);
-    setMolName(file.name.replace(/\.[^/.]+$/, "")); // 👈 use filename as molecule name
-  }
-};
-reader.readAsText(file);
+              if (!file) return;
 
+              const ext = file.name.split(".").pop().toLowerCase();
+              setMolName(file.name.replace(/\.[^/.]+$/, ""));
 
+              if (ext === "pdb") {
+                // 👇 load as PDB
+                setPdbFile(file);
+                setSmiles("");
+                setData(null);
+                setError(null);
+                return;
+              }
+
+              // 👇 load as SMILES
+              const reader = new FileReader();
+              reader.onload = (ev) => {
+                const text = ev.target.result;
+                const firstLine = text.split("\n").find((l) => l.trim().length > 0);
+                if (firstLine) {
+                  const smilesFromFile = firstLine.split(/\s+/)[0];
+                  setSmiles(smilesFromFile);
+                  setPdbFile(null);
+                }
+              };
+              reader.readAsText(file);
             }}
           />
         </Button>
@@ -148,6 +167,7 @@ reader.readAsText(file);
           color="primary"
           onClick={fetchProperties}
           sx={{ whiteSpace: "nowrap" }}
+          disabled={!!pdbFile} // 👈 disable for PDB
         >
           Analyze
         </Button>
@@ -159,14 +179,14 @@ reader.readAsText(file);
         </Typography>
       )}
 
-      {data && (
+      {/* if data or a PDB file exist, show the 3D section */}
+      {(data || pdbFile) && (
         <Box sx={{ mt: 4 }}>
           <Divider sx={{ mb: 2, borderColor: "rgba(255,255,255,0.1)" }} />
           <Typography variant="h6" gutterBottom>
-            Molecular Properties
+            Molecular Visualization
           </Typography>
 
-          {/* Unified rectangular layout */}
           <Box
             sx={{
               mt: 3,
@@ -179,113 +199,123 @@ reader.readAsText(file);
               overflow: "hidden",
             }}
           >
-            {/* LEFT: 2D + properties + QED bar */}
-            <Box
-              sx={{
-                flex: 1,
-                display: "flex",
-                flexDirection: "column",
-                justifyContent: "flex-start",
-                alignItems: "center",
-                p: 2,
-                borderRight: {
-                  xs: "none",
-                  md: "1px solid rgba(255,255,255,0.08)",
-                },
-                boxSizing: "border-box",
-                gap: 2,
-              }}
-            >
-            {molName && (
-          <Typography
-            variant="h6" // slightly larger than subtitle1
-            sx={{
-              fontWeight: 700,
-              color: "primary.main",
-              mb: 1,
-              letterSpacing: 0.8,
-              textTransform: "uppercase", // 👈 converts to all caps
-            }}
-          >
-            {molName}
-          </Typography>
-        )}
-
-              {renderMolecule()}
-
-              {/* Properties table (without QED) */}
+            {/* LEFT: show 2D + properties only for SMILES */}
+            {!pdbFile && (
               <Box
-                component="table"
                 sx={{
-                  fontSize: "0.9rem",
-                  borderCollapse: "collapse",
-                  width: "100%",
-                  maxWidth: 320,
-                  "& td, & th": {
-                    border: "1px solid rgba(255,255,255,0.1)",
-                    padding: "4px 6px",
+                  flex: 1,
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "flex-start",
+                  alignItems: "center",
+                  p: 2,
+                  borderRight: {
+                    xs: "none",
+                    md: "1px solid rgba(255,255,255,0.08)",
                   },
-                  "& th": { color: "#ccc" },
+                  boxSizing: "border-box",
+                  gap: 2,
                 }}
               >
-                <tbody>
-                  {Object.entries(data)
-                    .filter(([key]) => !["insights", "QED"].includes(key))
-                    .map(([key, value]) => (
-                      <tr key={key}>
-                        <td>
-                          <strong>{key}</strong>
-                        </td>
-                        <td>{value}</td>
-                      </tr>
-                    ))}
-                </tbody>
-              </Box>
-
-              {/* QED score bar */}
-              {data?.QED !== undefined && (
-                <Box sx={{ width: "100%", maxWidth: 320, mt: 1 }}>
+                {molName && (
                   <Typography
-                    variant="subtitle2"
-                    sx={{ color: "primary.main", fontWeight: 600, mb: 0.5 }}
-                  >
-                    QED Score
-                  </Typography>
-                  <LinearProgress
-                    variant="determinate"
-                    value={data.QED * 100}
+                    variant="h6"
                     sx={{
-                      height: 8,
-                      borderRadius: 2,
-                      "& .MuiLinearProgress-bar": {
-                        backgroundColor:
-                          data.QED > 0.7
-                            ? "#4caf50"
-                            : data.QED > 0.4
-                            ? "#ffb300"
-                            : "#f44336",
-                      },
+                      fontWeight: 700,
+                      color: "primary.main",
+                      mb: 1,
+                      letterSpacing: 0.8,
+                      textTransform: "uppercase",
                     }}
-                  />
-                  <Typography
-                    variant="body2"
-                    sx={{ color: "text.secondary", mt: 0.5, fontSize: "0.9rem" }}
                   >
-                    {data.QED.toFixed(2)}{" "}
-                    {data.QED > 0.7
-                      ? "– Highly drug-like"
-                      : data.QED > 0.4
-                      ? "– Moderately drug-like"
-                      : "– Low drug-likeness"}
+                    {molName}
                   </Typography>
-                </Box>
-              )}
-            </Box>
+                )}
 
-            {/* RIGHT: 3D Viewer */}
+                {renderMolecule()}
+
+                {/* Properties table */}
+                {data && (
+                  <>
+                    <Box
+                      component="table"
+                      sx={{
+                        fontSize: "0.9rem",
+                        borderCollapse: "collapse",
+                        width: "100%",
+                        maxWidth: 320,
+                        "& td, & th": {
+                          border: "1px solid rgba(255,255,255,0.1)",
+                          padding: "4px 6px",
+                        },
+                        "& th": { color: "#ccc" },
+                      }}
+                    >
+                      <tbody>
+                        {Object.entries(data)
+                          .filter(([key]) => !["insights", "QED"].includes(key))
+                          .map(([key, value]) => (
+                            <tr key={key}>
+                              <td>
+                                <strong>{key}</strong>
+                              </td>
+                              <td>{value}</td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </Box>
+
+                    {/* QED score */}
+                    {data?.QED !== undefined && (
+                      <Box sx={{ width: "100%", maxWidth: 320, mt: 1 }}>
+                        <Typography
+                          variant="subtitle2"
+                          sx={{ color: "primary.main", fontWeight: 600, mb: 0.5 }}
+                        >
+                          QED Score
+                        </Typography>
+                        <LinearProgress
+                          variant="determinate"
+                          value={data.QED * 100}
+                          sx={{
+                            height: 8,
+                            borderRadius: 2,
+                            "& .MuiLinearProgress-bar": {
+                              backgroundColor:
+                                data.QED > 0.7
+                                  ? "#4caf50"
+                                  : data.QED > 0.4
+                                  ? "#ffb300"
+                                  : "#f44336",
+                            },
+                          }}
+                        />
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            color: "text.secondary",
+                            mt: 0.5,
+                            fontSize: "0.9rem",
+                          }}
+                        >
+                          {data.QED.toFixed(2)}{" "}
+                          {data.QED > 0.7
+                            ? "– Highly drug-like"
+                            : data.QED > 0.4
+                            ? "– Moderately drug-like"
+                            : "– Low drug-likeness"}
+                        </Typography>
+                      </Box>
+                    )}
+                  </>
+                )}
+              </Box>
+            )}
+
+            {/* RIGHT: 3D Viewer (handles both SMILES and PDB) */}
             <Box
               sx={{
-                flex: 1.2,
+                flex: pdbFile ? 1 : 1.2,
                 display: "flex",
                 justifyContent: "center",
                 alignItems: "center",
@@ -293,12 +323,12 @@ reader.readAsText(file);
                 boxSizing: "border-box",
               }}
             >
-              <MoleculeViewer smiles={smiles} />
+              <MoleculeViewer smiles={pdbFile ? null : smiles} pdbFile={pdbFile} />
             </Box>
           </Box>
 
-          {/* Design Insights BELOW the rectangle */}
-          {data?.insights && (
+          {/* Insights */}
+          {!pdbFile && data?.insights && (
             <Box
               sx={{
                 mt: 3,
