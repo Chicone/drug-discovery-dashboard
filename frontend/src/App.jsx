@@ -1,150 +1,176 @@
-import { useState, useEffect } from "react";
-import MoleculeViewer from "./MoleculeViewer";
+import { motion, AnimatePresence } from "framer-motion";
+import { useState } from "react";
+import {
+  AppBar,
+  Toolbar,
+  Typography,
+  Tabs,
+  Tab,
+  Box,
+  Container,
+  GlobalStyles,
+} from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 
-function App() {
-  const [smiles, setSmiles] = useState("");
-  const [data, setData] = useState(null);
-  const [error, setError] = useState(null);
-  const [RDKit, setRDKit] = useState(null);
+import MolecularDesign from "./pages/MolecularDesign.jsx";
+import Docking from "./pages/Docking.jsx";
+import AdmetAnalysis from "./pages/AdmetAnalysis.jsx";
+import Library from "./pages/Library.jsx";
+import Reports from "./pages/Reports.jsx";
+import MolecularDynamics from "./pages/MolecularDynamics.jsx";
 
-  useEffect(() => {
-    const loadRDKit = async () => {
-      const RDKitModule = await window.initRDKitModule();
-      setRDKit(RDKitModule);
-    };
-    if (!window.initRDKitModule) {
-      // dynamically load RDKit.js script
-      const script = document.createElement("script");
-      script.src = "https://unpkg.com/@rdkit/rdkit/dist/RDKit_minimal.js";
-      script.onload = loadRDKit;
-      document.body.appendChild(script);
-    } else {
-      loadRDKit();
-    }
-  }, []);
+import logo from "./assets/logo.png";
 
-  const fetchProperties = async () => {
-    setError(null);
-    try {
-      const res = await fetch(`/api/properties?smiles=${encodeURIComponent(smiles)}`);
-      const json = await res.json();
-      if (json.error) setError(json.error);
-      else setData(json);
-    } catch (e) {
-      setError("Could not connect to backend");
-    }
-  };
+export default function App() {
+  const theme = useTheme();
+  const [tab, setTab] = useState(0);
 
-  const renderMolecule = () => {
-    if (!RDKit || !smiles) return null;
-    try {
-      const mol = RDKit.get_mol(smiles);
-      const svg = mol.get_svg();
-      mol.delete();
-      return (
-        <div
-          dangerouslySetInnerHTML={{ __html: svg }}
-          style={{ border: "1px solid #ccc", marginTop: "1rem" }}
-        />
-      );
-    } catch {
-      return <p style={{ color: "red" }}>Invalid SMILES for visualization</p>;
+  const render = () => {
+    switch (tab) {
+      case 0:
+        return <MolecularDesign />;
+      case 1:
+        return <Docking />;
+      case 2:
+        return <AdmetAnalysis />;
+      case 3:
+        return <Library />;
+      case 4:
+        return <Reports />;
+      case 5:
+        return <MolecularDynamics />;
+      default:
+        return null;
     }
   };
 
-return (
-  <div style={{
-    padding: "2rem",
-    fontFamily: "sans-serif",
-    color: "white",
-    backgroundColor: "#121212",
-    minHeight: "100vh",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-  }}>
-    <h1 style={{ marginBottom: "1rem" }}>Drug Discovery Dashboard</h1>
-
-    <div style={{ display: "flex", gap: "0.5rem" }}>
-      <input
-        type="text"
-        placeholder="Enter SMILES (e.g. CCO)"
-        value={smiles}
-        onChange={(e) => setSmiles(e.target.value)}
-        style={{
-          width: "300px",
-          padding: "0.5rem",
-          borderRadius: "4px",
-          border: "1px solid #555",
-          color: "#fff",
-          background: "#222",
+  return (
+    <Box
+      sx={{
+        background: "#121212",
+        color: "white",
+        minHeight: "100vh",
+        overflowX: "hidden",
+      }}
+    >
+      <GlobalStyles
+        styles={{
+          html: { scrollbarGutter: "stable both-edges" },
+          body: {
+            scrollbarGutter: "stable both-edges",
+            overflowX: "hidden !important",
+          },
+          "#root": {
+            overflowX: "hidden !important",
+          },
         }}
       />
-      <input
-          type="file"
-          accept=".smi,.txt"
-          onChange={(e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = (ev) => {
-              const text = ev.target.result;
-              const firstLine = text.split("\n").find((l) => l.trim().length > 0);
-              if (firstLine) {
-                const smilesFromFile = firstLine.split(/\s+/)[0]; // get first token
-                setSmiles(smilesFromFile);
-              }
-            };
-            reader.readAsText(file);
-          }}
-          style={{ marginTop: "1rem", display: "block" }}
-        />
-      <button
-        onClick={fetchProperties}
-        style={{
-          padding: "0.5rem 1rem",
-          background: "#444",
-          border: "none",
-          color: "white",
-          borderRadius: "4px",
-          cursor: "pointer",
+
+      <AppBar
+        position="sticky"
+        sx={{
+          background: "rgba(18, 18, 18, 0.8)",
+          backdropFilter: "blur(8px)",
+          borderBottom: "1px solid rgba(255,255,255,0.1)",
         }}
       >
-        Analyze
-      </button>
-    </div>
+        <Toolbar>
+          {/* LEFT SIDE: LOGO + TITLE */}
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              flexGrow: 1,
+              minWidth: 0,
+            }}
+          >
+            <Box
+              component="img"
+              src={logo}
+              alt="Logo"
+              sx={{
+                width: 36,
+                height: 36,
+                mr: 1.5,
+                objectFit: "contain",
+                filter: "drop-shadow(0 0 2px rgba(0,0,0,0.3))",
+              }}
+            />
+            <Box>
+              <Typography
+                variant="h6"
+                sx={{
+                  fontWeight: 600,
+                  color: theme.palette.primary.main,
+                  lineHeight: 1.2,
+                }}
+              >
+                Drug Design Dashboard
+              </Typography>
+              <Typography
+                variant="caption"
+                sx={{ color: "text.secondary", letterSpacing: 0.8 }}
+              >
+                UNIGE · Pharmaceutical Biochemistry
+              </Typography>
+            </Box>
+          </Box>
+          <Box sx={{ flexGrow: 1 }} />
+          <Box sx={{ width: 40 }} />
+          {/* RIGHT SIDE: NAVIGATION TABS */}
+          <Tabs
+            value={tab}
+            onChange={(_, v) => setTab(v)}
+            textColor="inherit"
+            indicatorColor="secondary"
+            variant="scrollable"
+            scrollButtons="auto"
+            sx={{
+              flexShrink: 0,
+              "& .MuiTabs-flexContainer": {
+                justifyContent: "flex-end",
+              },
+              "& .MuiTab-root": {
+                minHeight: 64,
+                textTransform: "none",
+                fontWeight: 500,
+                whiteSpace: "nowrap",
+              },
+            }}
+          >
+            <Tab label="Molecular Design" />
+            <Tab label="Docking" />
+            <Tab label="ADMET" />
+            <Tab label="Library" />
+            <Tab label="Reports" />
+            <Tab label="Molecular Dynamics" />
+          </Tabs>
+        </Toolbar>
+      </AppBar>
 
-    {error && <p style={{ color: "red" }}>{error}</p>}
-
-    {data && (
-      <div style={{ marginTop: "2rem", textAlign: "center" }}>
-        <table
-          border="1"
-          cellPadding="5"
-          style={{
-            margin: "0 auto",
-            borderCollapse: "collapse",
-            minWidth: "250px",
-          }}
-        >
-          <tbody>
-            {Object.entries(data).map(([key, value]) => (
-              <tr key={key}>
-                <td><strong>{key}</strong></td>
-                <td>{value}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        {/* Viewer container */}
-        <div style={{ marginTop: "1.5rem", display: "flex", justifyContent: "center" }}>
-          <MoleculeViewer smiles={smiles} />
-        </div>
-      </div>
-    )}
-  </div>
-);
+      {/* ✅ CONTENT SECTION */}
+      <Container
+        maxWidth="lg"
+        sx={{
+          py: 4,
+          minHeight: "calc(100vh - 64px)",
+          display: "flex",
+          flexDirection: "column",
+          overflowX: "hidden",
+        }}
+      >
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={tab}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.3 }}
+          >
+            {render()}
+          </motion.div>
+        </AnimatePresence>
+      </Container>
+    </Box>
+  );
 }
-
-export default App;
