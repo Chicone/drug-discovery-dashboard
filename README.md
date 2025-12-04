@@ -11,35 +11,67 @@ cd drug-discovery-dashboard
 
 2. Set up the backend (FastAPI)  
 
-It is recommended to use conda or venv for environment management.
-Using conda:  
-conda create -n drugdash python=3.10  
-conda activate drugdash  
-conda env create -f environment.yml
+### 🔧 Environment Setup
 
-Or using pip directly:  
-python -m venv venv  
-source venv/bin/activate  (On Windows: venv\Scripts\activate)  
-pip install -r requirements.txt  
+This project uses different environment files depending on the operating system.
 
-Then start the FastAPI server:  
-uvicorn app.main:app --reload  
+> Recommended environment manager: **conda**  
+> Recommended Python version: **3.11**
 
+---
+
+#### 🟢 Ubuntu (Linux)
+
+```bash
+conda create -n drugdash python=3.11
+conda activate drugdash
+conda env create -f environment_ubuntu.yml
+```
+
+#### 🟢 macOS Intel (x86_64)
+```bash
+conda create -n drugdash python=3.11
+conda activate drugdash
+conda env create -f environment_mac_intel.yml
+```
+
+#### 🟢 macOS ARM (M1 / M2 / M3 / M4) (not tested yet)
+```bash
+conda config --set subdir osx-arm64
+conda create -n drugdash python=3.11
+conda activate drugdash
+conda env create -f environment_mac_arm.yml
+```
+
+#### 🟢 Windows (not tested yet)
+
+[//]: # (Or using pip directly:  )
+[//]: # (python -m venv venv  )
+[//]: # (source venv/bin/activate  &#40;On Windows: venv\Scripts\activate&#41;  )
+[//]: # (pip install -r requirements.txt  )
+
+### 🚀 Running the backend and frontend
+1. Move into the backend directory and start the FastAPI server: 
+```bash
+cd backend/
+uvicorn main:app --reload
+```
 The backend will be available at:  
 http://127.0.0.1:8000
 
-3. Set up the frontend (React)  
-Open a new terminal and go to the frontend directory:  
+2. Move into the frontend directory and set up the frontend (React)  
+Open a new terminal and do:  
+```bash
 cd frontend  
 npm install  
-npm start  
-
+npm run dev
+```
 The frontend will be available at:  
-http://localhost:3000
+http://localhost:5173
 
-4. Access the dashboard  
+3. Access the dashboard  
 Once both servers are running, open your browser and visit:  
-http://localhost:3000
+http://localhost:5173
 
 You should see the interactive drug discovery dashboard interface.
 

@@ -318,7 +318,7 @@ async def dock_vina(receptor: UploadFile, ligand: UploadFile):
         center = np.mean(coords, axis=0)
         print(f"[DEBUG] Auto-center: {center}")
 
-        v.compute_vina_maps(center=center.tolist(), box_size=[20, 20, 20])
+        v.compute_vina_maps(center=center.tolist(), box_size=[10, 10, 10])
 
         # ---------------------------------------------------------
         # 6) Run docking
