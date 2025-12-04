@@ -5,10 +5,12 @@ It provides a unified environment for molecular visualization, descriptor calcul
 
 ## 🚀 Installation
 
-1. Clone the repository  
+1. Clone the repository
+```bash  
 git clone https://github.com/Chicone/drug-discovery-dashboard.git  
 cd drug-discovery-dashboard
-
+git checkout dev
+```
 2. Set up the backend (FastAPI)  
 
 ### 🔧 Environment Setup
