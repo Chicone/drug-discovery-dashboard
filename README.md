@@ -23,16 +23,16 @@ This project uses different environment files depending on the operating system.
 #### 🟢 Ubuntu (Linux)
 
 ```bash
-conda create -n drugdash python=3.11
-conda activate drugdash
 conda env create -f environment_ubuntu.yml
+conda activate drugdash
+
 ```
 
 #### 🟢 macOS Intel (x86_64)
 ```bash
 conda create -n drugdash python=3.11
 conda activate drugdash
-conda env create -f environment_mac_intel.yml
+conda env update -f environment_mac_intel.yml
 ```
 
 #### 🟢 macOS ARM (M1 / M2 / M3 / M4) (not tested yet)
@@ -40,7 +40,7 @@ conda env create -f environment_mac_intel.yml
 conda config --set subdir osx-arm64
 conda create -n drugdash python=3.11
 conda activate drugdash
-conda env create -f environment_mac_arm.yml
+conda env update -f environment_mac_arm.yml
 ```
 
 #### 🟢 Windows (not tested yet)
