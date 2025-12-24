@@ -1,0 +1,49 @@
+name: drugdash
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.12
+
+  # Core scientific stack
+  - numpy
+  - scipy
+  - pandas
+  - matplotlib
+  - pillow
+
+  # Chemistry / structure
+  - rdkit
+  - openbabel
+  - vina
+  - gemmi
+
+  # Backend / API
+  - fastapi
+  - uvicorn
+  - uvicorn-standard
+  - sqlalchemy
+  - pydantic
+  - python-dotenv
+  - python-multipart
+  - requests
+  - pyyaml
+  - rich
+  - typer
+  - typer-slim-standard
+
+  # Frontend tooling
+  - nodejs=20
+
+  # Build / pip bridge
+  - pip
+
+  - pip:
+      - meeko
+      - cairocffi
+      - cairosvg
+      - cssselect2
+      - defusedxml
+      - tinycss2
+      - webencodings
+
