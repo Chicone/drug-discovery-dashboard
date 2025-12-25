@@ -15,6 +15,8 @@ function Docking() {
   const [pdbText, setPdbText] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [poses, setPoses] = useState([]);
+  const [selectedPoseIdx, setSelectedPoseIdx] = useState(0);
 
   const handleDocking = async () => {
     if (!receptorFile || !ligandFile) {
@@ -41,18 +43,34 @@ function Docking() {
       throw new Error(errText || "Docking failed");
     }
 
-    // Decode FileResponse properly as text
-    const arrayBuffer = await res.arrayBuffer();
-    const decoder = new TextDecoder("utf-8");
-    const pdb = decoder.decode(arrayBuffer);
+    const data = await res.json();
 
-    // Confirm the PDB contains ATOM lines
-    if (!pdb.includes("ATOM") && !pdb.includes("HETATM")) {
-      console.warn("⚠️ Docking returned empty or invalid PDB:", pdb.slice(0, 200));
-      setError("Docking completed but no valid PDB content received.");
-    } else {
-      setPdbText(pdb);
+    setPoses(data.poses);
+    setSelectedPoseIdx(0);
+    setPdbText(data.poses[0].pdb);
+
+
+    // data.poses is an array of { mode, score, pdb }
+    if (!data.poses || data.poses.length === 0) {
+      setError("Docking completed but returned no poses.");
+      return;
     }
+
+    setPdbText(data.poses[0].pdb);
+
+
+    // // Decode FileResponse properly as text
+    // const arrayBuffer = await res.arrayBuffer();
+    // const decoder = new TextDecoder("utf-8");
+    // const pdb = decoder.decode(arrayBuffer);
+    //
+    // // Confirm the PDB contains ATOM lines
+    // if (!pdb.includes("ATOM") && !pdb.includes("HETATM")) {
+    //   console.warn("⚠️ Docking returned empty or invalid PDB:", pdb.slice(0, 200));
+    //   setError("Docking completed but no valid PDB content received.");
+    // } else {
+    //   setPdbText(pdb);
+    // }
 
     } catch (err) {
       console.error("Docking error:", err);
@@ -140,6 +158,34 @@ function Docking() {
           <MoleculeViewer pdbText={pdbText} />
         </Box>
       )}
+
+      {poses.length > 0 && (
+        <Box sx={{ mt: 3 }}>
+          <Typography variant="subtitle1" sx={{ mb: 1 }}>
+            Docking poses
+          </Typography>
+
+          <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
+            {poses.map((pose, i) => (
+              <Button
+                key={pose.mode ?? i}
+                size="small"
+                variant={i === selectedPoseIdx ? "contained" : "outlined"}
+                onClick={() => {
+                  setSelectedPoseIdx(i);
+                  setPdbText(pose.pdb);
+                }}
+              >
+                Pose {pose.mode}
+                {typeof pose.score === "number"
+                  ? ` (${pose.score.toFixed(2)})`
+                  : ""}
+              </Button>
+            ))}
+          </Box>
+        </Box>
+      )}
+
 
       {!pdbText && !loading && (
         <Typography variant="body2" sx={{ color: "#aaa", mt: 3 }}>

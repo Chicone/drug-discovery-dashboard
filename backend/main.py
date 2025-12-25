@@ -1,7 +1,10 @@
-from fastapi import FastAPI, Query
-from fastapi.responses import Response
+from fastapi import FastAPI, Query, UploadFile, File, Form
+from fastapi.responses import Response, JSONResponse
 from rdkit.Chem import Descriptors, Crippen, Lipinski, rdMolDescriptors
 from rdkit.Chem import QED
+from typing import Optional
+import re
+
 
 app = FastAPI()
 
@@ -191,9 +194,25 @@ from rdkit.Chem import AllChem
 from meeko import MoleculePreparation, PDBQTMolecule, RDKitMolCreate
 from vina import Vina
 
-
 @app.post("/api/dock_vina")
-async def dock_vina(receptor: UploadFile, ligand: UploadFile):
+async def dock_vina(
+    receptor: UploadFile = File(...),
+    ligand: UploadFile = File(...),
+
+    # Box (optional: default to your current behavior)
+    center_x: Optional[float] = Form(None),
+    center_y: Optional[float] = Form(None),
+    center_z: Optional[float] = Form(None),
+    size_x: float = Form(10.0),
+    size_y: float = Form(10.0),
+    size_z: float = Form(10.0),
+
+    # Vina params
+    exhaustiveness: int = Form(8),
+    num_modes: int = Form(9),
+    seed: Optional[int] = Form(None),
+):
+
     """
     Dock a ligand into a receptor using Meeko + Vina.
     - Receptor: PDB upload (protein).
@@ -203,6 +222,46 @@ async def dock_vina(receptor: UploadFile, ligand: UploadFile):
     try:
         tmp = tempfile.mkdtemp(prefix="vina_meeko_")
         print(f"[DEBUG] Working directory: {tmp}")
+
+        def split_pdbqt_models(pdbqt_text: str) -> list[str]:
+            """
+            Split a multi-model PDBQT string into per-model strings.
+            Works for Vina outputs containing MODEL/ENDMDL blocks.
+            """
+            if "MODEL" not in pdbqt_text:
+                return [pdbqt_text]
+
+            models = []
+            cur = []
+            in_model = False
+            for line in pdbqt_text.splitlines(keepends=True):
+                if line.startswith("MODEL"):
+                    in_model = True
+                    cur = [line]
+                elif line.startswith("ENDMDL") and in_model:
+                    cur.append(line)
+                    models.append("".join(cur))
+                    in_model = False
+                elif in_model:
+                    cur.append(line)
+
+            return models if models else [pdbqt_text]
+
+        def parse_vina_score(pdbqt_model: str) -> Optional[float]:
+            """
+            Extract score from a Vina pose block.
+            Looks for: 'REMARK VINA RESULT:   -7.5 ...'
+            """
+            for line in pdbqt_model.splitlines():
+                if "VINA RESULT:" in line:
+                    # Example: REMARK VINA RESULT: -7.5  0.0  0.0
+                    parts = line.split()
+                    for p in parts:
+                        try:
+                            return float(p)
+                        except ValueError:
+                            continue
+            return None
 
         # ---------------------------------------------------------
         # Helper: save UploadFile to disk safely
@@ -315,15 +374,30 @@ async def dock_vina(receptor: UploadFile, ligand: UploadFile):
         if not coords:
             raise ValueError("No ATOM/HETATM lines in receptor PDB")
 
-        center = np.mean(coords, axis=0)
-        print(f"[DEBUG] Auto-center: {center}")
+        # Choose center
+        if center_x is None or center_y is None or center_z is None:
+            # keep your current auto-center
+            center = np.mean(coords, axis=0).tolist()
+            print(f"[DEBUG] Auto-center: {center}")
+        else:
+            center = [float(center_x), float(center_y), float(center_z)]
 
-        v.compute_vina_maps(center=center.tolist(), box_size=[10, 10, 10])
+        box_size = [float(size_x), float(size_y), float(size_z)]
+
+        v.compute_vina_maps(center=center, box_size=box_size)
 
         # ---------------------------------------------------------
         # 6) Run docking
         # ---------------------------------------------------------
-        v.dock(exhaustiveness=8, n_poses=5)
+        dock_kwargs = {
+            "exhaustiveness": int(exhaustiveness),
+            "n_poses": int(num_modes),
+        }
+        if seed is not None:
+            dock_kwargs["seed"] = int(seed)
+
+        v.dock(**dock_kwargs)
+
         score = v.score()
         if isinstance(score, (list, np.ndarray)):
             best_score = score[0]
@@ -332,66 +406,87 @@ async def dock_vina(receptor: UploadFile, ligand: UploadFile):
         print(f"[DEBUG] Best score: {best_score:.3f}")
 
         # ---------------------------------------------------------
-        # 7) Get best pose and convert back to RDKit with Meeko
-        # ---------------------------------------------------------
-        vina_output = v.poses()
-        if isinstance(vina_output, (list, tuple)):
-            vina_pdbqt_str = vina_output[0]
-        else:
-            vina_pdbqt_str = vina_output
-
-        pdbqt_mol = PDBQTMolecule(vina_pdbqt_str, skip_typing=True)
-        rdkit_mols = RDKitMolCreate.from_pdbqt_mol(pdbqt_mol)
-
-        if not rdkit_mols or rdkit_mols[0] is None:
-            raise ValueError("Failed to create RDKit mol from Vina PDBQT pose")
-
-        mol_docked = rdkit_mols[0]
-        docked_pdb = os.path.join(tmp, "docked_meeko.pdb")
-        Chem.MolToPDBFile(mol_docked, docked_pdb)
-
-        # ---------------------------------------------------------
-        # 8) Fix receptor PDB formatting and load both with RDKit
+        # 7) Prepare receptor RDKit mol once (we'll reuse it)
         # ---------------------------------------------------------
         fixed_rec_pdb = os.path.join(tmp, "receptor_fixed.pdb")
         fix_pdb_format(rec_pdb, fixed_rec_pdb)
 
         rec_mol = Chem.MolFromPDBFile(fixed_rec_pdb, removeHs=False)
-        lig_mol = Chem.MolFromPDBFile(docked_pdb, removeHs=False)
-
         if rec_mol is None:
             raise ValueError(
-                "Receptor PDB could not be parsed by RDKit "
-                "even after cleaning"
+                "Receptor PDB could not be parsed by RDKit even after cleaning"
             )
-        if lig_mol is None:
-            raise ValueError(
-                "Docked ligand PDB could not be parsed by RDKit"
-            )
-
-        # ensure they have conformers (3D coords)
         try:
             rec_mol.GetConformer()
-            lig_mol.GetConformer()
         except Exception:
-            raise ValueError(
-                "Receptor or ligand has no conformer (3D coordinates missing)"
+            raise ValueError("Receptor has no conformer (3D coordinates missing)")
+
+        # ---------------------------------------------------------
+        # 8) Get ALL poses from Vina as multi-model PDBQT text
+        # ---------------------------------------------------------
+        try:
+            vina_pdbqt_all = v.poses(n_poses=int(num_modes))
+        except TypeError:
+            # some vina versions don't accept n_poses here
+            vina_pdbqt_all = v.poses()
+
+        if isinstance(vina_pdbqt_all, (list, tuple)):
+            # Some builds return list of pose strings already
+            pose_pdbqt_models = list(vina_pdbqt_all)
+        else:
+            # Most builds return one multi-model PDBQT string
+            pose_pdbqt_models = split_pdbqt_models(vina_pdbqt_all)
+
+        # ---------------------------------------------------------
+        # 9) Convert each pose to RDKit + merge with receptor
+        # ---------------------------------------------------------
+        poses = []
+        for i, pose_pdbqt in enumerate(pose_pdbqt_models):
+            score_i = parse_vina_score(pose_pdbqt)
+
+            pdbqt_mol = PDBQTMolecule(pose_pdbqt, skip_typing=True)
+            rdkit_mols = RDKitMolCreate.from_pdbqt_mol(pdbqt_mol)
+
+            if not rdkit_mols or rdkit_mols[0] is None:
+                continue
+
+            lig_mol = rdkit_mols[0]
+            try:
+                lig_mol.GetConformer()
+            except Exception:
+                continue
+
+            merged = Chem.CombineMols(rec_mol, lig_mol)
+            merged_pdb_text = Chem.MolToPDBBlock(merged)
+
+            poses.append(
+                {
+                    "mode": i + 1,
+                    "score": score_i,
+                    "pdb": merged_pdb_text,
+                }
             )
 
-        # ---------------------------------------------------------
-        # 9) Merge receptor + ligand and write final complex
-        # ---------------------------------------------------------
-        merged = Chem.CombineMols(rec_mol, lig_mol)
-        merged_pdb = os.path.join(tmp, "complex_meeko.pdb")
-        Chem.MolToPDBFile(merged, merged_pdb)
+        if not poses:
+            raise ValueError("No valid poses produced by Vina/Meeko conversion")
 
-        print(f"[DEBUG] RDKit merged complex written to {merged_pdb}")
-
-        return FileResponse(
-            merged_pdb,
-            media_type="chemical/x-pdb",
-            filename="docked_complex.pdb",
+        best_score = min(
+            [p["score"] for p in poses if p["score"] is not None],
+            default=None,
         )
+
+        return JSONResponse(
+            {
+                "best_score": best_score,
+                "center": center,
+                "box_size": box_size,
+                "exhaustiveness": int(exhaustiveness),
+                "num_modes": int(num_modes),
+                "seed": int(seed) if seed is not None else None,
+                "poses": poses,
+            }
+        )
+
 
     except Exception as e:
         print(f"[ERROR] {e}")
