@@ -203,9 +203,9 @@ async def dock_vina(
     center_x: Optional[float] = Form(None),
     center_y: Optional[float] = Form(None),
     center_z: Optional[float] = Form(None),
-    size_x: float = Form(10.0),
-    size_y: float = Form(10.0),
-    size_z: float = Form(10.0),
+    size_x: float = Form(22.0),
+    size_y: float = Form(22.0),
+    size_z: float = Form(22.0),
 
     # Vina params
     exhaustiveness: int = Form(8),
@@ -375,12 +375,22 @@ async def dock_vina(
             raise ValueError("No ATOM/HETATM lines in receptor PDB")
 
         # Choose center
-        if center_x is None or center_y is None or center_z is None:
-            # keep your current auto-center
+        def is_zero_center(x, y, z, eps=1e-6) -> bool:
+            return (x is not None and y is not None and z is not None
+                    and abs(float(x)) < eps and abs(float(y)) < eps and abs(float(z)) < eps)
+
+        if (
+                center_x is None
+                or center_y is None
+                or center_z is None
+                or is_zero_center(center_x, center_y, center_z)
+        ):
+            # auto-center on receptor (your current behavior)
             center = np.mean(coords, axis=0).tolist()
-            print(f"[DEBUG] Auto-center: {center}")
+            print(f"[DEBUG] Auto-center (receptor centroid): {center}")
         else:
             center = [float(center_x), float(center_y), float(center_z)]
+            print(f"[DEBUG] User center: {center}")
 
         box_size = [float(size_x), float(size_y), float(size_z)]
 
@@ -398,12 +408,6 @@ async def dock_vina(
 
         v.dock(**dock_kwargs)
 
-        score = v.score()
-        if isinstance(score, (list, np.ndarray)):
-            best_score = score[0]
-        else:
-            best_score = score
-        print(f"[DEBUG] Best score: {best_score:.3f}")
 
         # ---------------------------------------------------------
         # 7) Prepare receptor RDKit mol once (we'll reuse it)
@@ -474,6 +478,7 @@ async def dock_vina(
             [p["score"] for p in poses if p["score"] is not None],
             default=None,
         )
+        print(f"[DEBUG] Best score from parsed poses: {best_score:.3f}")
 
         return JSONResponse(
             {
