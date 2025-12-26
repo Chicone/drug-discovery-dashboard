@@ -21,6 +21,7 @@ function Docking() {
   const [error, setError] = useState("");
   const [poses, setPoses] = useState([]);
   const [selectedPoseIdx, setSelectedPoseIdx] = useState(0);
+  const [boxFile, setBoxFile] = useState(null);
   const [dockParams, setDockParams] = useState({
     num_modes: 10,
     exhaustiveness: 8,
@@ -39,8 +40,28 @@ function Docking() {
     setDockParams((p) => ({ ...p, [key]: value }));
   };
 
+    const applyBoxFromJsonText = (jsonText) => {
+      const data = JSON.parse(jsonText);
 
-  const handleDocking = async () => {
+      const c = data.box_center;
+      const s = data.box_size;
+
+      if (!Array.isArray(c) || c.length !== 3 || !Array.isArray(s) || s.length !== 3) {
+        throw new Error("Invalid box JSON: expected box_center and box_size arrays of length 3.");
+      }
+
+      setDockParams((p) => ({
+        ...p,
+        center_x: Number(c[0]),
+        center_y: Number(c[1]),
+        center_z: Number(c[2]),
+        size_x: Number(s[0]),
+        size_y: Number(s[1]),
+        size_z: Number(s[2]),
+      }));
+    };
+
+    const handleDocking = async () => {
     if (!receptorFile || !ligandFile) {
       setError("Please upload both receptor and ligand files.");
       return;
@@ -92,7 +113,7 @@ function Docking() {
     } finally {
       setLoading(false);
     }
-  };
+    };
 
   return (
     <Paper
@@ -159,12 +180,52 @@ function Docking() {
           sx={{ py: 0.8 }}
         >
           Upload Ligand (.smi or .pdb)
-          <input
-            type="file"
-            accept=".smi,.pdb"
-            hidden
-            onChange={(e) => setLigandFile(e.target.files[0])}
-          />
+<input
+  type="file"
+  accept=".smi,.pdb,.sdf,.mol2"
+  hidden
+  onChange={async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setLigandFile(file);
+
+    // 👇 THIS is where /api/load_ligand is called
+    const fd = new FormData();
+    fd.append("ligand", file);
+
+    try {
+      const res = await fetch("/api/load_ligand", {
+        method: "POST",
+        body: fd,
+      });
+
+      if (!res.ok) {
+        console.error("load_ligand failed");
+        return;
+      }
+
+      const data = await res.json();
+      console.log("load_ligand response:", data);
+
+      // 👇 THIS is where the form is auto-filled
+      if (data.box?.center && data.box?.size) {
+        setDockParams((p) => ({
+          ...p,
+          center_x: data.box.center[0],
+          center_y: data.box.center[1],
+          center_z: data.box.center[2],
+          size_x: data.box.size[0],
+          size_y: data.box.size[1],
+          size_z: data.box.size[2],
+        }));
+      }
+    } catch (err) {
+      console.error("Failed to load ligand:", err);
+    }
+  }}
+/>
+
         </Button>
       </Stack>
 
@@ -229,6 +290,40 @@ function Docking() {
 <Typography variant="subtitle2"  sx={{ mb: 0.5 }}>
   Docking box (Å)
 </Typography>
+
+<Box sx={{ mb: 1.5 }}>
+  <Button
+    variant="contained"
+    component="label"
+    color="secondary"
+    fullWidth
+    size="small"
+    sx={{ py: 0.8 }}
+  >
+    Load docking box (JSON)
+    <input
+      type="file"
+      accept=".json"
+      hidden
+      onChange={(e) => {
+        const f = e.target.files?.[0];
+        if (!f) return;
+
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            applyBoxFromJsonText(String(reader.result));
+          } catch (err) {
+            console.error(err);
+            setError(err.message);
+          }
+        };
+        reader.readAsText(f);
+      }}
+    />
+  </Button>
+</Box>
+
 
 <Box
   sx={{
