@@ -184,6 +184,9 @@ def fetch_pdb(pdb_id: str):
 import os
 import shutil
 import tempfile
+import uuid
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import numpy as np
 from fastapi import UploadFile
@@ -194,6 +197,8 @@ from rdkit.Chem import AllChem
 
 from meeko import MoleculePreparation, PDBQTMolecule, RDKitMolCreate
 from vina import Vina
+
+RUNS_DIR = Path(__file__).resolve().parent / "data" / "docking_runs"
 
 @app.post("/api/dock_vina")
 async def dock_vina(
@@ -481,8 +486,62 @@ async def dock_vina(
         )
         print(f"[DEBUG] Best score from parsed poses: {best_score:.3f}")
 
+        # ---------------------------------------------------------
+        # Persist docking run (Run History v1)
+        # ---------------------------------------------------------
+        RUNS_DIR.mkdir(parents=True, exist_ok=True)
+
+        run_id = str(uuid.uuid4())
+        run_dir = RUNS_DIR / run_id
+        run_dir.mkdir(exist_ok=False)
+
+        created_at = datetime.now(
+            ZoneInfo("Europe/Paris")
+        ).isoformat(timespec="seconds")
+
+        # Save poses (raw Vina multi-model output)
+        poses_pdbqt_path = run_dir / "poses.pdbqt"
+        with open(poses_pdbqt_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(pose_pdbqt_models).strip() + "\n")
+
+        scores = [p.get("score") for p in poses]
+
+        if best_score is None:
+            best_pose_index = None
+        else:
+            best_pose_index = min(
+                range(len(scores)),
+                key=lambda i: scores[i] if scores[i] is not None else float("inf"),
+            )
+
+        run_record = {
+            "run_id": run_id,
+            "created_at": created_at,
+            "ligand": Path(ligand.filename).stem,
+            "receptor": receptor.filename,
+            "box": {
+                "center": [float(x) for x in center],
+                "size": [float(x) for x in box_size],
+            },
+            "vina": {
+                "exhaustiveness": int(exhaustiveness),
+                "num_modes": int(num_modes),
+            },
+            "results": {
+                "scores": scores,
+                "best_pose_index": best_pose_index,
+            },
+        }
+
+        (run_dir / "run.json").write_text(
+            json.dumps(run_record, indent=2),
+            encoding="utf-8",
+        )
+
         return JSONResponse(
             {
+                "run_id": run_id,
+                "created_at": created_at,
                 "best_score": best_score,
                 "center": center,
                 "box_size": box_size,
@@ -500,6 +559,45 @@ async def dock_vina(
             status_code=500,
             content={"error": str(e)},
         )
+
+@app.get("/api/docking/runs")
+def list_docking_runs():
+    runs_dir = RUNS_DIR
+    if not runs_dir.exists():
+        return []
+
+    runs = []
+    for run_dir in runs_dir.iterdir():
+        if not run_dir.is_dir():
+            continue
+        run_json = run_dir / "run.json"
+        if not run_json.exists():
+            continue
+
+        try:
+            data = json.loads(run_json.read_text(encoding="utf-8"))
+            scores = (
+                data.get("results", {})
+                    .get("scores", [])
+            )
+            best = None
+            numeric_scores = [s for s in scores if isinstance(s, (int, float))]
+            if numeric_scores:
+                best = min(numeric_scores)
+
+            runs.append({
+                "run_id": data.get("run_id"),
+                "created_at": data.get("created_at"),
+                "ligand": data.get("ligand"),
+                "receptor": data.get("receptor"),
+                "best_score": best,
+            })
+        except Exception:
+            continue
+
+    runs.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+    return runs
+
 
 
 from fastapi import UploadFile, File

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Box,
   Paper,
@@ -7,6 +7,7 @@ import {
   Stack,
   LinearProgress,
   Divider,
+    Tooltip,
 } from "@mui/material";
 
 import MoleculeViewer from "../MoleculeViewer";
@@ -14,6 +15,7 @@ import Grid from "@mui/material/Grid";
 import TextField from "@mui/material/TextField";
 
 function Docking() {
+  const [runHistory, setRunHistory] = useState([]);
   const [receptorFile, setReceptorFile] = useState(null);
   const [ligandFile, setLigandFile] = useState(null);
   const [pdbText, setPdbText] = useState("");
@@ -61,6 +63,21 @@ function Docking() {
       }));
     };
 
+    const loadRunHistory = async () => {
+      try {
+        const res = await fetch("/api/docking/runs");
+        if (!res.ok) {
+          console.error("Failed to fetch run history:", await res.text());
+          return;
+        }
+        const data = await res.json();
+        setRunHistory(data);
+      } catch (err) {
+        console.error("Failed to load run history:", err);
+      }
+    };
+
+
     const handleDocking = async () => {
     if (!receptorFile || !ligandFile) {
       setError("Please upload both receptor and ligand files.");
@@ -96,6 +113,8 @@ function Docking() {
     }
 
     const data = await res.json();
+    loadRunHistory();
+
 
     // data.poses is an array of { mode, score, pdb }
     if (!data.poses || data.poses.length === 0) {
@@ -114,6 +133,11 @@ function Docking() {
       setLoading(false);
     }
     };
+
+    useEffect(() => {
+      loadRunHistory();
+    }, []);
+
 
   return (
     <Paper
@@ -236,10 +260,24 @@ function Docking() {
   Parameters
 </Typography>
 
-<Box sx={{ maxWidth: 150, mx: "left" }}>
+<Box sx={{ maxWidth: 120, mx: "left" }}>
   <Stack spacing={1}>
+      <TextField
+      label="Exhaustiveness"
+      type="number"
+      fullWidth
+      size="small"
+      margin="dense"
+      value={dockParams.exhaustiveness}
+      onChange={(e) =>
+        setDockParams((p) => ({
+          ...p,
+          exhaustiveness: Number(e.target.value),
+        }))
+      }
+    />
     <TextField
-      label="Number of modes"
+      label="Modes"
       type="number"
       fullWidth
       size="small"
@@ -254,22 +292,7 @@ function Docking() {
     />
 
     <TextField
-      label="Exhaustiveness"
-      type="number"
-      fullWidth
-      size="small"
-      margin="dense"
-      value={dockParams.exhaustiveness}
-      onChange={(e) =>
-        setDockParams((p) => ({
-          ...p,
-          exhaustiveness: Number(e.target.value),
-        }))
-      }
-    />
-
-    <TextField
-      label="CPU cores (0 = auto)"
+      label="CPUs (0 = auto)"
       type="number"
       fullWidth
       size="small"
@@ -292,6 +315,7 @@ function Docking() {
 </Typography>
 
 <Box sx={{ mb: 1.5 }}>
+ <Tooltip title="Load, if available, a binding-site box from a box.json file to auto-fill the docking box fields" arrow>
   <Button
     variant="contained"
     component="label"
@@ -322,6 +346,7 @@ function Docking() {
       }}
     />
   </Button>
+ </Tooltip>
 </Box>
 
 
@@ -464,6 +489,35 @@ function Docking() {
       </Box>
     </Box>
   )}
+
+          {runHistory.length > 0 && (
+      <Box sx={{ mt: 3 }}>
+        <Typography variant="subtitle1" sx={{ mb: 1 }}>
+          Docking run history
+        </Typography>
+
+        <Stack spacing={0.5}>
+          {runHistory.map((run) => (
+            <Box
+              key={run.run_id}
+              sx={{
+                p: 1,
+                borderRadius: 1,
+                background: "#2a2a2a",
+                fontSize: "0.85rem",
+              }}
+            >
+              <strong>{run.ligand}</strong>
+              {typeof run.best_score === "number" && (
+                <> — best {run.best_score.toFixed(2)}</>
+              )}
+              <br />
+              <span style={{ color: "#aaa" }}>{run.created_at}</span>
+            </Box>
+          ))}
+        </Stack>
+      </Box>
+    )}
 </Grid>
 
   </Grid>
