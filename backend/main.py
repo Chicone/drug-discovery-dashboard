@@ -501,8 +501,13 @@ async def dock_vina(
 
         # Save poses (raw Vina multi-model output)
         poses_pdbqt_path = run_dir / "poses.pdbqt"
+
         with open(poses_pdbqt_path, "w", encoding="utf-8") as f:
             f.write("\n".join(pose_pdbqt_models).strip() + "\n")
+
+        # Save receptor used for docking (needed to reload full complex)
+        receptor_pdbqt_out = run_dir / "receptor.pdbqt"
+        shutil.copyfile(rec_pdbqt, receptor_pdbqt_out)
 
         scores = [p.get("score") for p in poses]
 
@@ -598,6 +603,78 @@ def list_docking_runs():
     runs.sort(key=lambda r: r.get("created_at") or "", reverse=True)
     return runs
 
+def pdbqt_to_pdb_text(pdbqt_text: str) -> str:
+    keep_prefixes = ("ATOM", "HETATM", "MODEL", "ENDMDL", "TER", "END", "REMARK")
+    drop_prefixes = ("ROOT", "ENDROOT", "BRANCH", "ENDBRANCH", "TORSDOF")
+
+    out_lines = []
+    for line in pdbqt_text.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+
+        if s.startswith(drop_prefixes):
+            # AutoDock torsion-tree directives: not valid PDB, breaks many viewers
+            continue
+
+        if s.startswith(("ATOM", "HETATM")):
+            # Strip PDBQT extras (charge + AutoDock atom type) by truncating
+            out_lines.append(line[:78])
+            continue
+
+        if s.startswith(keep_prefixes):
+            out_lines.append(line)
+            continue
+
+        # Drop any other unknown lines
+        continue
+
+    return "\n".join(out_lines) + "\n"
+
+
+
+@app.get("/api/docking/runs/{run_id}")
+def get_docking_run(run_id: str):
+    run_dir = RUNS_DIR / run_id
+    run_json = run_dir / "run.json"
+    poses_file = run_dir / "poses.pdbqt"
+
+    if not run_json.exists() or not poses_file.exists():
+        return JSONResponse(
+            status_code=404,
+            content={"error": "Run not found"},
+        )
+
+    data = json.loads(run_json.read_text(encoding="utf-8"))
+
+    # Rebuild poses in the SAME format as /api/dock_vina returns
+    receptor_pdbqt_file = run_dir / "receptor.pdbqt"
+    receptor_pdb = ""
+    if receptor_pdbqt_file.exists():
+        receptor_pdbqt_text = receptor_pdbqt_file.read_text(encoding="utf-8")
+        receptor_pdb = pdbqt_to_pdb_text(receptor_pdbqt_text).strip() + "\n"
+
+    poses = []
+    raw_models = poses_file.read_text(encoding="utf-8").split("MODEL")
+    scores = data["results"]["scores"]
+
+    for i, model in enumerate(raw_models[1:]):
+        ligand_pdbqt_pose = "MODEL" + model
+        ligand_pdb_pose = pdbqt_to_pdb_text(ligand_pdbqt_pose).strip() + "\n"
+
+        # Return a "complex" PDB-like text: receptor + this ligand pose
+        complex_pdb = receptor_pdb + ligand_pdb_pose
+
+        poses.append({
+            "mode": i + 1,
+            "score": scores[i] if i < len(scores) else None,
+            "pdb": complex_pdb,
+        })
+
+    return {
+        "run": data,
+        "poses": poses,
+    }
 
 
 from fastapi import UploadFile, File
