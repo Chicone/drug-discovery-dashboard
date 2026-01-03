@@ -36,3 +36,6 @@ coverage/
 *.pytest_cache/
 .pytest_cache/
 
+# Docking run history (generated at runtime)
+backend/data/docking_runs/
+

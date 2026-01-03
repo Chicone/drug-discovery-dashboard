@@ -65,6 +65,7 @@ http://127.0.0.1:8000
 Open a new terminal and do:  
 ```bash
 cd frontend  
+conda activate drugdash
 npm install  
 npm run dev
 ```
