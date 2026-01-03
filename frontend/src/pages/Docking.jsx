@@ -15,6 +15,7 @@ import Grid from "@mui/material/Grid";
 import TextField from "@mui/material/TextField";
 
 function Docking() {
+  const [residueView, setResidueView] = useState("distance"); // "distance" | "sequence"
   const [selectedRunId, setSelectedRunId] = useState(null);
   const [poseAnalysis, setPoseAnalysis] = useState(null);
   const [runHistory, setRunHistory] = useState([]);
@@ -212,6 +213,113 @@ function Docking() {
       console.error("Failed to load pose analysis:", e);
     }
   };
+
+    const groupResiduesIntoRanges = (residuesSeq) => {
+    // residuesSeq items: { chain, res_seq, res_name, min_dist }
+    // We group contiguous residue numbers per chain into ranges.
+
+    const toInt = (x) => {
+      const n = Number.parseInt(String(x), 10);
+      return Number.isFinite(n) ? n : null;
+    };
+
+    // Group by chain
+    const byChain = new Map();
+    (residuesSeq ?? []).forEach((r) => {
+      const chain = r.chain ?? "?";
+      if (!byChain.has(chain)) byChain.set(chain, []);
+      byChain.get(chain).push(r);
+    });
+
+    const ranges = [];
+
+    for (const [chain, list] of byChain.entries()) {
+      // Sort by residue index numeric
+      const sorted = [...list].sort((a, b) => {
+        const ai = toInt(a.res_seq);
+        const bi = toInt(b.res_seq);
+        if (ai === null && bi === null) return String(a.res_seq).localeCompare(String(b.res_seq));
+        if (ai === null) return 1;
+        if (bi === null) return -1;
+        return ai - bi;
+      });
+
+      let start = null;
+      let prev = null;
+
+      const flush = () => {
+        if (!start) return;
+        const sName = start.res_name;
+        const sSeq = start.res_seq;
+        const eName = prev.res_name;
+        const eSeq = prev.res_seq;
+
+        const label =
+          String(sSeq) === String(eSeq)
+            ? `${sName}${sSeq} (${chain})`
+            : `${sName}${sSeq}–${eName}${eSeq} (${chain})`;
+
+        ranges.push({
+          key: `${chain}:${sSeq}-${eSeq}`,
+          label,
+          chain,
+          start_seq: sSeq,
+          end_seq: eSeq,
+        });
+
+        start = null;
+        prev = null;
+      };
+
+      for (const r of sorted) {
+        const i = toInt(r.res_seq);
+        if (i === null) {
+          // Non-integer residue id: treat as its own "range"
+          if (start) flush();
+          ranges.push({
+            key: `${chain}:${r.res_seq}-${r.res_seq}`,
+            label: `${r.res_name}${r.res_seq} (${chain})`,
+            chain,
+            start_seq: r.res_seq,
+            end_seq: r.res_seq,
+          });
+          continue;
+        }
+
+        if (!start) {
+          start = r;
+          prev = r;
+          continue;
+        }
+
+        const prevI = toInt(prev.res_seq);
+        if (prevI !== null && i === prevI + 1) {
+          // contiguous
+          prev = r;
+        } else {
+          flush();
+          start = r;
+          prev = r;
+        }
+      }
+
+      flush();
+    }
+
+    // Keep chains grouped but stable
+    return ranges;
+  };
+
+
+  const residuesToShow =
+  residueView === "sequence"
+    ? (poseAnalysis?.residues_seq ?? [])
+    : (poseAnalysis?.residues ?? []);
+
+  const residueRanges =
+    residueView === "sequence"
+      ? groupResiduesIntoRanges(poseAnalysis?.residues_seq ?? [])
+      : [];
 
 
   return (
@@ -554,22 +662,61 @@ function Docking() {
         Polar: {poseAnalysis.counts?.polar ?? 0}
       </Typography>
 
-      <Box sx={{ mt: 1, display: "flex", flexWrap: "wrap", gap: 1 }}>
-        {(poseAnalysis.residues ?? []).map((r) => (
-          <Box
-            key={`${r.chain}-${r.res_seq}-${r.res_name}`}
-            sx={{
-              px: 1,
-              py: 0.5,
-              borderRadius: 1,
-              background: "#2a2a2a",
-              fontSize: "0.85rem",
-            }}
-          >
-            {r.res_name}{r.res_seq} ({r.chain})
-          </Box>
-        ))}
+      <Box sx={{ display: "flex", gap: 1, alignItems: "center", mt: 1 }}>
+        <Typography variant="body2" sx={{ color: "#aaa" }}>
+          Residues view:
+        </Typography>
+
+        <Button
+          size="small"
+          variant={residueView === "distance" ? "contained" : "outlined"}
+          onClick={() => setResidueView("distance")}
+        >
+          Distance
+        </Button>
+
+        <Button
+          size="small"
+          variant={residueView === "sequence" ? "contained" : "outlined"}
+          onClick={() => setResidueView("sequence")}
+        >
+          Sequence
+        </Button>
       </Box>
+      
+      <Box sx={{ mt: 1, display: "flex", flexWrap: "wrap", gap: 1 }}>
+        {residueView === "sequence"
+          ? residueRanges.map((g) => (
+              <Box
+                key={g.key}
+                sx={{
+                  px: 1,
+                  py: 0.5,
+                  borderRadius: 1,
+                  background: "#2a2a2a",
+                  fontSize: "0.85rem",
+                }}
+              >
+                {g.label}
+              </Box>
+            ))
+          : residuesToShow.map((r) => (
+              <Box
+                key={`${r.chain}-${r.res_seq}-${r.res_name}`}
+                sx={{
+                  px: 1,
+                  py: 0.5,
+                  borderRadius: 1,
+                  background: "#2a2a2a",
+                  fontSize: "0.85rem",
+                }}
+              >
+                {r.res_name}{r.res_seq} ({r.chain})
+                {typeof r.min_dist === "number" ? ` – ${r.min_dist} Å` : ""}
+              </Box>
+            ))}
+      </Box>
+
     </Box>
   )}
 

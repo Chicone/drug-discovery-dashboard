@@ -88,6 +88,39 @@ def analyze_pose_contacts_from_files(
     # Pairwise squared distances (L x R)
     d2 = np.sum((lig_xyz[:, None, :] - rec_xyz[None, :, :]) ** 2, axis=2)
 
+    # Minimum distance per residue
+    res_min_dist: dict[tuple[str, str, str], float] = {}
+
+    for li in range(d2.shape[0]):
+        for ri in range(d2.shape[1]):
+            dist = float(np.sqrt(d2[li, ri]))
+            if dist > cutoff_res:
+                continue
+            r = rec[ri]
+            key = (r["chain_id"], r["res_seq"], r["res_name"])
+            if key not in res_min_dist or dist < res_min_dist[key]:
+                res_min_dist[key] = dist
+
+    # Residues sorted by sequence (for contiguity inspection)
+    def _res_seq_int(x: str) -> int:
+        try:
+            return int(x)
+        except Exception:
+            return 10 ** 9
+
+    residues_seq = [
+        {
+            "chain": c,
+            "res_seq": rs,
+            "res_name": rn,
+            "min_dist": round(res_min_dist[(c, rs, rn)], 2),
+        }
+        for (c, rs, rn) in sorted(
+            res_min_dist.keys(),
+            key=lambda k: (k[0], _res_seq_int(k[1]), k[1])
+        )
+    ]
+
     # (1) residues within cutoff_res
     cutoff2 = cutoff_res * cutoff_res
     close = d2 <= cutoff2
@@ -99,8 +132,16 @@ def analyze_pose_contacts_from_files(
         residues_set.add((a["chain_id"], a["res_seq"], a["res_name"]))
 
     residues = [
-        {"chain": c, "res_seq": rs, "res_name": rn}
-        for (c, rs, rn) in sorted(residues_set)
+        {
+            "chain": c,
+            "res_seq": rs,
+            "res_name": rn,
+            "min_dist": round(res_min_dist[(c, rs, rn)], 2),
+        }
+        for (c, rs, rn) in sorted(
+            res_min_dist.keys(),
+            key=lambda k: res_min_dist[k]
+        )
     ]
 
     # (2) rough contact counts
@@ -127,6 +168,7 @@ def analyze_pose_contacts_from_files(
 
     return {
         "residues": residues,
+        "residues_seq": residues_seq,  # sorted by sequence
         "counts": {
             "hbond_candidates": hbond_candidates,
             "hydrophobic": hydrophobic,
