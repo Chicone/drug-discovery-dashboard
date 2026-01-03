@@ -10,12 +10,33 @@ import { Box, FormControl, InputLabel, MenuItem, Select, Typography } from "@mui
  */
 export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
   const viewerRef = useRef(null);
+  const viewerObjRef = useRef(null);
+  const hasRenderedOnceRef = useRef(false);
+
   const [style, setStyle] = useState("stick");
   const [err, setErr] = useState("");
 
+  useEffect(() => {
+    if (!window.$3Dmol || !viewerRef.current) return;
+
+    // Create once
+    viewerObjRef.current = window.$3Dmol.createViewer(viewerRef.current, {
+      backgroundColor: "#111",
+    });
+
+    // optional: resize on next tick
+    setTimeout(() => viewerObjRef.current?.resize(), 0);
+
+    return () => {
+      viewerObjRef.current = null;
+      hasRenderedOnceRef.current = false;
+    };
+  }, []);
+
+
   // helper to render PDB text (protein + ligand)
   const renderPdbString = (pdbStr) => {
-    if (!window.$3Dmol || !viewerRef.current) return;
+    if (!window.$3Dmol || !viewerRef.current || !viewerObjRef.current) return;
     setErr("");
 
     const aminoAcids = new Set([
@@ -23,9 +44,13 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
       "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL",
     ]);
 
-    const el = viewerRef.current;
-    el.innerHTML = "";
-    const viewer = window.$3Dmol.createViewer(el, { backgroundColor: "#111" });
+    const viewer = viewerObjRef.current;
+
+    // Save current view (orientation/zoom/translation)
+    const prevView = hasRenderedOnceRef.current ? viewer.getView() : null;
+
+    // Update model without recreating viewer
+    viewer.removeAllModels();
 
     let model;
     try {
@@ -50,20 +75,7 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
     const hasProtein = atoms.some((a) => aminoAcids.has(a.resn));
     const hasLigand = atoms.some((a) => !aminoAcids.has(a.resn));
 
-//     if (hasProtein && hasLigand) {
-//       // Protein → cartoon
-//       viewer.setStyle(
-//         { resn: Array.from(aminoAcids) },
-//         { cartoon: { color: "spectrum", opacity: 0.85 } }
-//       );
-//
-//       // Ligand (e.g. UNL) → atoms only, no bonds
-//       viewer.setStyle(
-//         { not: { resn: Array.from(aminoAcids) } },
-//         { sphere: { radius: 0.6 } }   // you can adjust radius (0.5–0.8)
-//       );
-
-
+    // Apply styles (same as your current logic)
     if (hasProtein && hasLigand) {
       viewer.setStyle(
         { resn: Array.from(aminoAcids) },
@@ -79,10 +91,18 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
       viewer.setStyle({}, { stick: { colorscheme: "greenCarbon", radius: 0.2 } });
     }
 
-    viewer.zoomTo();
+    // Restore previous camera view if we have one, otherwise zoomTo once
+    if (prevView) {
+      viewer.setView(prevView);
+    } else {
+      viewer.zoomTo();
+    }
+
     viewer.render();
+    hasRenderedOnceRef.current = true;
     setTimeout(() => viewer.resize(), 0);
   };
+
 
   // main rendering effect
   useEffect(() => {
@@ -105,20 +125,35 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
 
     // Case 3: SMILES mode
     if (smiles) {
-      const el = viewerRef.current;
-      el.innerHTML = "";
-      const viewer = window.$3Dmol.createViewer(el, { backgroundColor: "#111" });
+      const viewer = viewerObjRef.current;
+      if (!viewer) return;
+
+      const prevView = hasRenderedOnceRef.current ? viewer.getView() : null;
+      viewer.removeAllModels();
+
 
       fetch(`/api/mol3d?smiles=${encodeURIComponent(smiles)}`)
         .then((r) => r.text())
         .then((molData) => {
-          if (!molData) return;
-          viewer.addModel(molData, "mol");
-          viewer.setStyle({}, { stick: { colorscheme: "cyanCarbon" } });
+        if (!molData) return;
+
+        // Preserve camera if we already rendered something before
+        const prevView2 = hasRenderedOnceRef.current ? viewer.getView() : null;
+
+        viewer.addModel(molData, "mol");
+        viewer.setStyle({}, { stick: { colorscheme: "cyanCarbon" } });
+
+        if (prevView2) {
+          viewer.setView(prevView2);
+        } else {
           viewer.zoomTo();
-          viewer.render();
-          setTimeout(() => viewer.resize(), 0);
-        })
+        }
+
+        viewer.render();
+        hasRenderedOnceRef.current = true;
+        setTimeout(() => viewer.resize(), 0);
+      })
+
         .catch(() => setErr("Failed to load 3D structure from SMILES."));
     }
   }, [pdbText, pdbFile, smiles]);

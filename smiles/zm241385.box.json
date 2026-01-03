@@ -1,0 +1,11 @@
+{
+  "ligand_id": "zm241385",
+  "ligand_alias": "NEC",
+  "source_pdb": "2YDV",
+  "box_center": [32.03, 8.71, -16.10],
+  "box_size": [22.0, 22.0, 22.0],
+  "units": "angstrom",
+  "method": "computed_from_co-crystallized_ligand",
+  "padding": 10.0
+}
+
