@@ -5,6 +5,134 @@ from rdkit.Chem import QED
 from typing import Optional
 from pathlib import Path
 import json
+from typing import Any
+import numpy as np
+from fastapi.responses import JSONResponse
+
+def _iter_pdbqt_atoms(pdbqt_text: str) -> list[dict[str, Any]]:
+    atoms: list[dict[str, Any]] = []
+    drop_prefixes = ("ROOT", "ENDROOT", "BRANCH", "ENDBRANCH", "TORSDOF")
+
+    for line in pdbqt_text.splitlines():
+        s = line.strip()
+        if not s or s.startswith(drop_prefixes):
+            continue
+        if not (line.startswith("ATOM") or line.startswith("HETATM")):
+            continue
+
+        atom_name = line[12:16].strip()
+        res_name = line[17:20].strip()
+        chain_id = (line[21:22].strip() or "?")
+        res_seq = line[22:26].strip()
+
+        try:
+            x = float(line[30:38])
+            y = float(line[38:46])
+            z = float(line[46:54])
+        except Exception:
+            continue
+
+        # Element: PDBQT usually has it in atom name, but be robust.
+        # Example: " C1 ", " OA ", " NA ", etc.
+        elem = atom_name[:2].strip().capitalize()
+        if len(elem) == 2 and elem[1].isdigit():
+            elem = elem[0]
+        if elem not in {"C", "N", "O", "S", "P", "F", "Cl", "Br", "I", "H"}:
+            elem = atom_name[:1].strip().capitalize()
+
+        atoms.append({
+            "record": "HETATM" if line.startswith("HETATM") else "ATOM",
+            "atom_name": atom_name,
+            "res_name": res_name,
+            "chain_id": chain_id,
+            "res_seq": res_seq,
+            "element": elem,
+            "xyz": (x, y, z),
+        })
+
+    return atoms
+
+
+def _split_pdbqt_models(poses_pdbqt_text: str) -> list[str]:
+    # Keep full "MODEL ... ENDMDL" blocks.
+    chunks = poses_pdbqt_text.split("MODEL")
+    models: list[str] = []
+    for c in chunks[1:]:
+        models.append("MODEL" + c)
+    return models
+
+
+def analyze_pose_contacts_from_files(
+    receptor_pdbqt_text: str,
+    ligand_pose_pdbqt_text: str,
+    cutoff_res: float = 4.0,
+    cutoff_hbond: float = 3.5,
+) -> dict[str, Any]:
+    rec_atoms = _iter_pdbqt_atoms(receptor_pdbqt_text)
+    lig_atoms = _iter_pdbqt_atoms(ligand_pose_pdbqt_text)
+
+    # Heuristic: receptor is ATOM, ligand is HETATM. If ligand got marked
+    # as ATOM by conversion, fall back to "everything in pose block".
+    rec = [a for a in rec_atoms if a["record"] == "ATOM"]
+    lig = [a for a in lig_atoms if a["record"] == "HETATM"] or lig_atoms
+
+    if not rec or not lig:
+        return {
+            "residues": [],
+            "counts": {"hbond_candidates": 0, "hydrophobic": 0, "polar": 0},
+        }
+
+    rec_xyz = np.array([a["xyz"] for a in rec], dtype=float)
+    lig_xyz = np.array([a["xyz"] for a in lig], dtype=float)
+
+    # Pairwise squared distances (L x R)
+    d2 = np.sum((lig_xyz[:, None, :] - rec_xyz[None, :, :]) ** 2, axis=2)
+
+    # (1) residues within cutoff_res
+    cutoff2 = cutoff_res * cutoff_res
+    close = d2 <= cutoff2
+    rec_idx = np.where(close)[1]
+
+    residues_set: set[tuple[str, str, str]] = set()
+    for j in rec_idx.tolist():
+        a = rec[j]
+        residues_set.add((a["chain_id"], a["res_seq"], a["res_name"]))
+
+    residues = [
+        {"chain": c, "res_seq": rs, "res_name": rn}
+        for (c, rs, rn) in sorted(residues_set)
+    ]
+
+    # (2) rough contact counts
+    rec_el = np.array([a["element"] for a in rec], dtype=object)
+    lig_el = np.array([a["element"] for a in lig], dtype=object)
+
+    is_rec_polar = np.isin(rec_el, ["N", "O", "S"])
+    is_lig_polar = np.isin(lig_el, ["N", "O", "S"])
+    is_rec_c = (rec_el == "C")
+    is_lig_c = (lig_el == "C")
+
+    # H-bond candidates: polar-polar within 3.5 Å (no angle check)
+    hb2 = cutoff_hbond * cutoff_hbond
+    hb_pairs = (d2 <= hb2) & (is_lig_polar[:, None] & is_rec_polar[None, :])
+    hbond_candidates = int(np.count_nonzero(hb_pairs))
+
+    # Hydrophobic contacts: C-C within cutoff_res
+    hyd_pairs = (d2 <= cutoff2) & (is_lig_c[:, None] & is_rec_c[None, :])
+    hydrophobic = int(np.count_nonzero(hyd_pairs))
+
+    # Polar contacts: any pair with at least one polar atom within cutoff_res
+    pol_pairs = (d2 <= cutoff2) & (is_lig_polar[:, None] | is_rec_polar[None, :])
+    polar = int(np.count_nonzero(pol_pairs))
+
+    return {
+        "residues": residues,
+        "counts": {
+            "hbond_candidates": hbond_candidates,
+            "hydrophobic": hydrophobic,
+            "polar": polar,
+        },
+    }
 
 
 app = FastAPI()
@@ -675,6 +803,29 @@ def get_docking_run(run_id: str):
         "run": data,
         "poses": poses,
     }
+
+@app.get("/api/docking/runs/{run_id}/analyze/{pose_idx}")
+def analyze_run_pose(run_id: str, pose_idx: int, cutoff: float = 4.0):
+    run_dir = RUNS_DIR / run_id
+    rec_file = run_dir / "receptor.pdbqt"
+    poses_file = run_dir / "poses.pdbqt"
+
+    if not rec_file.exists() or not poses_file.exists():
+        return JSONResponse(status_code=404, content={"error": "Run not found"})
+
+    receptor_text = rec_file.read_text(encoding="utf-8")
+    models = _split_pdbqt_models(poses_file.read_text(encoding="utf-8"))
+
+    if pose_idx < 0 or pose_idx >= len(models):
+        return JSONResponse(status_code=404, content={"error": "Pose not found"})
+
+    out = analyze_pose_contacts_from_files(
+        receptor_pdbqt_text=receptor_text,
+        ligand_pose_pdbqt_text=models[pose_idx],
+        cutoff_res=float(cutoff),
+    )
+    return out
+
 
 
 from fastapi import UploadFile, File

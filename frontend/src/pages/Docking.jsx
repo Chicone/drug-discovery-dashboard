@@ -15,6 +15,8 @@ import Grid from "@mui/material/Grid";
 import TextField from "@mui/material/TextField";
 
 function Docking() {
+  const [selectedRunId, setSelectedRunId] = useState(null);
+  const [poseAnalysis, setPoseAnalysis] = useState(null);
   const [runHistory, setRunHistory] = useState([]);
   const [receptorFile, setReceptorFile] = useState(null);
   const [ligandFile, setLigandFile] = useState(null);
@@ -137,6 +139,79 @@ function Docking() {
     useEffect(() => {
       loadRunHistory();
     }, []);
+
+
+    const loadRun = async (runId) => {
+      try {
+        const res = await fetch(`/api/docking/runs/${runId}`);
+        if (!res.ok) return;
+
+        setSelectedRunId(runId);
+
+        const data = await res.json();
+
+        // 1) poses (this part already works for you)
+        if (data.poses?.length) {
+          setPoses(data.poses);
+          setSelectedPoseIdx(0);
+          setPdbText(data.poses[0].pdb);
+        }
+
+        setSelectedPoseIdx(0);
+        setPdbText(data.poses[0].pdb);
+        loadPoseAnalysis(runId, 0);
+
+
+        // 2) run metadata (box + params)
+        const run = data.run || {};
+
+        // Box
+        const box = run.box;
+        if (box?.center?.length === 3 && box?.size?.length === 3) {
+          setDockParams((p) => ({
+            ...p,
+            center_x: Number(box.center[0]),
+            center_y: Number(box.center[1]),
+            center_z: Number(box.center[2]),
+            size_x: Number(box.size[0]),
+            size_y: Number(box.size[1]),
+            size_z: Number(box.size[2]),
+          }));
+        }
+
+        // Vina params (support BOTH possible names)
+        const vina = run.vina || run.vina_params || {};
+        if (vina.exhaustiveness != null || vina.num_modes != null || vina.cpu != null) {
+          setDockParams((p) => ({
+            ...p,
+            exhaustiveness: vina.exhaustiveness != null
+              ? Number(vina.exhaustiveness)
+              : p.exhaustiveness,
+            num_modes: vina.num_modes != null
+              ? Number(vina.num_modes)
+              : p.num_modes,
+            cpu: vina.cpu != null ? Number(vina.cpu) : p.cpu,
+          }));
+        }
+      } catch (err) {
+        console.error("Failed to load run:", err);
+      }
+    };
+
+  const loadPoseAnalysis = async (runId, poseIdx) => {
+    if (!runId && runId !== 0) return;
+
+    try {
+      const res = await fetch(
+        `/api/docking/runs/${runId}/analyze/${poseIdx}?cutoff=4.0`
+      );
+      if (!res.ok) return;
+      const data = await res.json();
+      setPoseAnalysis(data);
+    } catch (e) {
+      console.error("Failed to load pose analysis:", e);
+    }
+  };
 
 
   return (
@@ -465,6 +540,40 @@ function Docking() {
     </Box>
   )}
 
+  {poseAnalysis && (
+    <Box sx={{ mt: 2 }}>
+      <Typography variant="subtitle1" sx={{ mb: 1 }}>
+        Pose interactions (within 4 Å)
+      </Typography>
+
+      <Typography variant="body2" sx={{ color: "#aaa" }}>
+        H-bond candidates: {poseAnalysis.counts?.hbond_candidates ?? 0}
+        {" | "}
+        Hydrophobic: {poseAnalysis.counts?.hydrophobic ?? 0}
+        {" | "}
+        Polar: {poseAnalysis.counts?.polar ?? 0}
+      </Typography>
+
+      <Box sx={{ mt: 1, display: "flex", flexWrap: "wrap", gap: 1 }}>
+        {(poseAnalysis.residues ?? []).map((r) => (
+          <Box
+            key={`${r.chain}-${r.res_seq}-${r.res_name}`}
+            sx={{
+              px: 1,
+              py: 0.5,
+              borderRadius: 1,
+              background: "#2a2a2a",
+              fontSize: "0.85rem",
+            }}
+          >
+            {r.res_name}{r.res_seq} ({r.chain})
+          </Box>
+        ))}
+      </Box>
+    </Box>
+  )}
+
+
   {poses.length > 0 && (
     <Box sx={{ mt: 3 }}>
       <Typography variant="subtitle1" sx={{ mb: 1 }}>
@@ -480,6 +589,9 @@ function Docking() {
             onClick={() => {
               setSelectedPoseIdx(i);
               setPdbText(pose.pdb);
+              if (selectedRunId) {
+                loadPoseAnalysis(selectedRunId, i);
+              }
             }}
           >
             Pose {pose.mode}
@@ -490,7 +602,7 @@ function Docking() {
     </Box>
   )}
 
-          {runHistory.length > 0 && (
+  {runHistory.length > 0 && (
       <Box sx={{ mt: 3 }}>
         <Typography variant="subtitle1" sx={{ mb: 1 }}>
           Docking run history
@@ -505,8 +617,12 @@ function Docking() {
                 borderRadius: 1,
                 background: "#2a2a2a",
                 fontSize: "0.85rem",
+                cursor: "pointer",
+                "&:hover": { background: "#333" },
               }}
+              onClick={() => loadRun(run.run_id)}
             >
+
               <strong>{run.ligand}</strong>
               {typeof run.best_score === "number" && (
                 <> — best {run.best_score.toFixed(2)}</>
@@ -537,10 +653,6 @@ function Docking() {
           {error}
         </Typography>
       )}
-
-
-
-
 
       {!pdbText && !loading && (
         <Typography variant="body2" sx={{ color: "#aaa", mt: 3 }}>
