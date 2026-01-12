@@ -683,7 +683,7 @@ function Docking() {
           Sequence
         </Button>
       </Box>
-      
+
       <Box sx={{ mt: 1, display: "flex", flexWrap: "wrap", gap: 1 }}>
         {residueView === "sequence"
           ? residueRanges.map((g) => (
