@@ -27,24 +27,53 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
   const [style, setStyle] = useState("stick");
   const [err, setErr] = useState("");
 
+  const [pickedAtom, setPickedAtom] = useState(null);
+  // store the last 3D label so we can remove it cleanly
+  const pickedLabelRef = useRef(null);
+
+
   // --- Helix selection state ---
   const [helices, setHelices] = useState([]);
   const [selectedHelixKeys, setSelectedHelixKeys] = useState(new Set());
 
   const helicesComputedRef = useRef(false);
 
-  const onManualMapFile = async (file) => {
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const obj = JSON.parse(text);
-      setManualHelixMap(obj);
-      setErr("");
-    } catch (e) {
-      console.error("Manual helix map parse error:", e);
-      setErr("Failed to parse manual helix map JSON.");
+  const onManualMapFile = (file) => {
+    if (!file) {
+      setManualHelixMap(null);
+      return;
     }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const json = JSON.parse(e.target.result);
+
+        // auto-pick the structure key
+        const keys = Object.keys(json);
+        if (keys.length === 0) {
+          console.error("Manual helix JSON has no keys");
+          setManualHelixMap(null);
+          return;
+        }
+
+        // use the first key (or only key)
+        const autoKey = keys[0];
+        setStructureKey(autoKey);
+
+        // save JSON and enable map
+        setManualHelixMap(json);
+        setUseManualMap(true);
+
+      } catch (err) {
+        console.error("Invalid JSON file:", err);
+        setManualHelixMap(null);
+      }
+    };
+
+    reader.readAsText(file);
   };
+
 
   const buildHelicesFromManualMap = (key) => {
     if (!manualHelixMap || !key) return null;
@@ -144,6 +173,47 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
       setErr("No model returned from PDB.");
       return;
     }
+
+    // Make atoms clickable (protein + ligand). Call render() after setting this.
+    viewer.setClickable({}, true, (atom, v) => {
+      if (!atom) return;
+
+      // Remove previous label
+      if (pickedLabelRef.current) {
+        v.removeLabel(pickedLabelRef.current);
+        pickedLabelRef.current = null;
+      }
+
+      // Build a nice display string
+      const chain = atom.chain || "?";
+      const resn = atom.resn || "?";
+      const resi = atom.resi ?? "?";
+      const aname = atom.atom || atom.name || "?";
+
+      const text = `${chain}:${resn}${resi} ${aname}`;
+
+      // Add a label at the clicked atom
+      pickedLabelRef.current = v.addLabel(text, {
+        position: atom,
+        inFront: true,
+        backgroundOpacity: 0.8,
+      });
+
+      // Update React state for a UI panel
+      setPickedAtom({
+        chain,
+        resn,
+        resi,
+        atom: aname,
+        elem: atom.elem || "",
+        serial: atom.serial ?? null,
+      });
+
+      v.render();
+    });
+
+    // IMPORTANT: setClickable needs a render to take effect
+    viewer.render();
 
     // Compute helices ONCE per PDB (manual-only)
     if (!helicesComputedRef.current) {
@@ -346,13 +416,6 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
             onChange={(e) => onManualMapFile(e.target.files?.[0] || null)}
           />
 
-          <input
-            type="text"
-            placeholder='Structure key, e.g. "2YDV"'
-            value={structureKey}
-            onChange={(e) => setStructureKey(e.target.value)}
-            style={{ width: "220px" }}
-          />
         </div>
 
         <div style={{ color: "#aaa", fontSize: "0.85em", marginTop: "6px" }}>
@@ -394,6 +457,16 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
       </div>
     )}
 
+    <Box
+      sx={{
+        display: "flex",
+        flexDirection: "row",
+        gap: 2,
+        alignItems: "flex-start",
+        width: "100%",
+      }}
+    >
+      {/* Left: 3D viewer */}
       <div
         ref={viewerRef}
         style={{
@@ -405,8 +478,42 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
           marginTop: "0.3rem",
           position: "relative",
           overflow: "hidden",
+          flex: "0 0 auto",
         }}
       />
+
+      {/* Right: info panel */}
+      <Box
+        sx={{
+          width: "320px",
+          minHeight: "600px",
+          border: "1px solid #555",
+          borderRadius: "6px",
+          background: "#1a1a1a",
+          color: "white",
+          p: 2,
+          flex: "0 0 auto",
+        }}
+      >
+        <Typography sx={{ fontWeight: 600, mb: 1 }}>
+          Selection
+        </Typography>
+
+        <Typography sx={{ color: "#ccc", fontSize: "0.95rem" }}>
+          <b>Picked:</b>{" "}
+          {pickedAtom
+            ? `${pickedAtom.chain}:${pickedAtom.resn}${pickedAtom.resi} ${pickedAtom.atom}`
+            : "Click an atom"}
+        </Typography>
+
+        {pickedAtom && (
+          <Box sx={{ mt: 1, color: "#aaa", fontSize: "0.85rem" }}>
+            {pickedAtom.serial != null && <div>Serial: {pickedAtom.serial}</div>}
+            {pickedAtom.elem && <div>Element: {pickedAtom.elem}</div>}
+          </Box>
+        )}
+      </Box>
+    </Box>
 
       {err && (
         <Typography sx={{ mt: 1 }} color="error">
