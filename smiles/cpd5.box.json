@@ -1,0 +1,11 @@
+{
+  "ligand_id": "cpd5",
+  "ligand_alias": "cpd5",
+  "source_pdb": "CPD5",
+  "box_center": [18.435, 6.099, 87.585],
+  "box_size": [22.0, 22.0, 22.0],
+  "units": "angstrom",
+  "method": "computed_from_co-crystallized_ligand",
+  "padding": 10.0
+}
+

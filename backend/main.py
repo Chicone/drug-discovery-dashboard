@@ -913,3 +913,209 @@ async def load_ligand(ligand: UploadFile = File(...)):
         resp["box_source"] = "sidecar_json"
 
     return resp
+
+
+# ================================================================
+# MOLECULAR DYNAMICS (MVP) ENDPOINTS
+# ================================================================
+import subprocess
+import zipfile
+
+MD_RUNS_DIR = Path(__file__).resolve().parent / "data" / "md_runs"
+
+
+def _md_job_dir(job_id: str) -> Path:
+    return MD_RUNS_DIR / job_id
+
+
+def _safe_mkdir(p: Path) -> None:
+    p.mkdir(parents=True, exist_ok=True)
+
+
+def _write_json(p: Path, obj: dict) -> None:
+    p.write_text(json.dumps(obj, indent=2), encoding="utf-8")
+
+
+def _read_json(p: Path) -> dict:
+    return json.loads(p.read_text(encoding="utf-8"))
+
+
+def _md_status_from_dir(job_dir: Path) -> str:
+    status_file = job_dir / "status.json"
+    if status_file.exists():
+        try:
+            return _read_json(status_file).get("status", "unknown")
+        except Exception:
+            return "unknown"
+
+    # Fallback inference
+    if (job_dir / "out" / "done.marker").exists():
+        return "done"
+    if (job_dir / "out" / "error.marker").exists():
+        return "error"
+    return "running"
+
+
+def _launch_md_docker(job_dir: Path) -> None:
+    """
+    Launch MD runner container asynchronously.
+    Expects an image named: md-runner:latest
+
+    Container contract:
+      - Reads:  /job/input/protein.pdb
+      - Reads:  /job/input/params.json
+      - Writes: /job/log.txt
+      - Writes: /job/status.json (optional but recommended)
+      - Writes: /job/out/* (outputs)
+    """
+    # IMPORTANT: This runs Docker from the host. For Docker-in-Docker,
+    # you would need the Docker socket mounted into the backend container.
+    cmd = [
+        "docker", "run", "--rm",
+        "-v", f"{str(job_dir)}:/job",
+        "md-runner:latest",
+    ]
+    subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+@app.post("/api/md/jobs")
+async def create_md_job(
+    protein_pdb: UploadFile = File(...),
+    preset: str = Form("cg_popc_50ns"),
+):
+    try:
+        MD_RUNS_DIR.mkdir(parents=True, exist_ok=True)
+
+        job_id = str(uuid.uuid4())
+        job_dir = _md_job_dir(job_id)
+        job_dir.mkdir(exist_ok=False)
+
+        input_dir = job_dir / "input"
+        out_dir = job_dir / "out"
+        _safe_mkdir(input_dir)
+        _safe_mkdir(out_dir)
+
+        pdb_path = input_dir / "protein.pdb"
+        protein_pdb.file.seek(0)
+        with open(pdb_path, "wb") as f:
+            shutil.copyfileobj(protein_pdb.file, f)
+
+        created_at = datetime.now(
+            ZoneInfo("Europe/Paris")
+        ).isoformat(timespec="seconds")
+
+        run_record = {
+            "job_id": job_id,
+            "created_at": created_at,
+            "preset": preset,
+            "protein_filename": protein_pdb.filename,
+        }
+        _write_json(job_dir / "run.json", run_record)
+
+        # Initialize status + log so frontend can read immediately
+        _write_json(job_dir / "status.json", {"status": "queued"})
+        (job_dir / "log.txt").write_text("", encoding="utf-8")
+
+        # Save params for container
+        params = {"preset": preset}
+        _write_json(input_dir / "params.json", params)
+
+        # Launch container
+        _launch_md_docker(job_dir)
+
+        # Mark as running
+        _write_json(job_dir / "status.json", {"status": "running"})
+
+        return JSONResponse({"job_id": job_id})
+
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/api/md/jobs")
+def list_md_jobs():
+    if not MD_RUNS_DIR.exists():
+        return []
+
+    jobs = []
+    for job_dir in MD_RUNS_DIR.iterdir():
+        if not job_dir.is_dir():
+            continue
+        run_json = job_dir / "run.json"
+        if not run_json.exists():
+            continue
+        try:
+            data = _read_json(run_json)
+            data["status"] = _md_status_from_dir(job_dir)
+            jobs.append(data)
+        except Exception:
+            continue
+
+    jobs.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+    return jobs
+
+
+@app.get("/api/md/jobs/{job_id}")
+def get_md_job(job_id: str):
+    job_dir = _md_job_dir(job_id)
+    run_json = job_dir / "run.json"
+    if not run_json.exists():
+        return JSONResponse(status_code=404, content={"error": "Job not found"})
+
+    data = _read_json(run_json)
+    data["status"] = _md_status_from_dir(job_dir)
+    return data
+
+
+@app.get("/api/md/jobs/{job_id}/log")
+def get_md_job_log(job_id: str):
+    job_dir = _md_job_dir(job_id)
+    log_path = job_dir / "log.txt"
+    if not log_path.exists():
+        return JSONResponse(status_code=404, content={"error": "Log not found"})
+    return Response(log_path.read_text(encoding="utf-8"), media_type="text/plain")
+
+
+@app.get("/api/md/jobs/{job_id}/files")
+def list_md_job_files(job_id: str):
+    job_dir = _md_job_dir(job_id)
+    out_dir = job_dir / "out"
+    if not out_dir.exists():
+        return JSONResponse(status_code=404, content={"error": "Job not found"})
+
+    files = []
+    for p in out_dir.rglob("*"):
+        if p.is_file():
+            rel = p.relative_to(out_dir).as_posix()
+            files.append({
+                "name": rel,
+                "size": p.stat().st_size,
+            })
+
+    files.sort(key=lambda x: x["name"])
+    return {"files": files}
+
+
+@app.get("/api/md/jobs/{job_id}/download")
+def download_md_job(job_id: str):
+    job_dir = _md_job_dir(job_id)
+    out_dir = job_dir / "out"
+    if not out_dir.exists():
+        return JSONResponse(status_code=404, content={"error": "Job not found"})
+
+    zip_path = job_dir / "out.zip"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        for p in out_dir.rglob("*"):
+            if p.is_file():
+                z.write(p, arcname=p.relative_to(out_dir).as_posix())
+
+    return FileResponse(
+        path=str(zip_path),
+        filename=f"md_{job_id}.zip",
+        media_type="application/zip",
+    )
+

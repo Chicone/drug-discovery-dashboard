@@ -20,7 +20,6 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
   const [manualHelixMap, setManualHelixMap] = useState(null); // object or null
   const [structureKey, setStructureKey] = useState("");       // e.g. "2YDV"
   const [useManualMap, setUseManualMap] = useState(false);
-  const [minHelixLen, setMinHelixLen] = useState(10);
   const viewerRef = useRef(null);
   const viewerObjRef = useRef(null);
   const hasRenderedOnceRef = useRef(false);
@@ -90,109 +89,6 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
   };
 
 
-
-  const extractHelicesFromModel = (model, {
-    minLen = 10,
-    maxGap = 2,       // merge segments separated by <= this many residues
-    onlyChain = null, // e.g. "A" to force receptor chain
-    topN = null,      // e.g. 7 for GPCR mode
-  } = {}) => {
-    // Pick chain(s) to consider
-    const proteinAtoms = model.selectedAtoms({}); // we'll filter by resn below
-
-    // Count residues per chain to auto-pick receptor chain (largest protein chain)
-    const chainResidues = new Map(); // chain -> Set(resi)
-    for (const a of proteinAtoms) {
-      if (!AMINO_ACIDS_SET.has(a.resn)) continue;
-      if (!a.chain) continue;
-      if (!chainResidues.has(a.chain)) chainResidues.set(a.chain, new Set());
-      chainResidues.get(a.chain).add(a.resi);
-    }
-
-    let receptorChain = onlyChain;
-    if (!receptorChain) {
-      let bestChain = null;
-      let bestCount = -1;
-      for (const [ch, resSet] of chainResidues.entries()) {
-        if (resSet.size > bestCount) {
-          bestCount = resSet.size;
-          bestChain = ch;
-        }
-      }
-      receptorChain = bestChain; // may be null if weird input
-    }
-
-    // Collect helix residues (ss === "h") for the chosen chain (or all if none)
-    const byChain = {};
-    for (const a of proteinAtoms) {
-      if (!AMINO_ACIDS_SET.has(a.resn)) continue;
-      if (a.ss !== "h") continue;
-      const ch = a.chain || "?";
-      if (receptorChain && ch !== receptorChain) continue;
-
-      if (!byChain[ch]) byChain[ch] = new Set();
-      byChain[ch].add(a.resi);
-    }
-
-    // Convert helix residues into segments, with gap-merging
-    const helices = [];
-    let helixIndex = 1;
-
-    for (const chain of Object.keys(byChain)) {
-      const resis = Array.from(byChain[chain]).map(Number).sort((a, b) => a - b);
-
-      let segStart = null;
-      let segPrev = null;
-
-      const flush = (start, end) => {
-        if (start === null) return;
-        helices.push({
-          key: `H${helixIndex}`,
-          label: `Helix ${helixIndex} — ${chain}:${start}-${end} (${end - start + 1} res)`,
-          chain,
-          start,
-          end,
-        });
-        helixIndex++;
-      };
-
-      for (const r of resis) {
-        if (segStart === null) {
-          segStart = r;
-          segPrev = r;
-          continue;
-        }
-
-        // If the next residue is within maxGap+1, treat as same helix (merge small breaks)
-        if (r <= segPrev + maxGap + 1) {
-          segPrev = r;
-        } else {
-          flush(segStart, segPrev);
-          segStart = r;
-          segPrev = r;
-        }
-      }
-      flush(segStart, segPrev);
-    }
-
-    // Filter by length
-    let filtered = helices.filter((h) => (h.end - h.start + 1) >= minLen);
-
-    // Optional: keep only the longest N helices (GPCR mode = 7)
-    if (typeof topN === "number") {
-      filtered = filtered
-        .slice()
-        .sort((a, b) => (b.end - b.start) - (a.end - a.start))
-        .slice(0, topN)
-        // sort back by chain+start for nicer list ordering
-        .sort((a, b) => (a.chain === b.chain ? a.start - b.start : a.chain.localeCompare(b.chain)));
-    }
-
-    return filtered;
-  };
-
-
-
   const toggleHelix = (key) => {
     setSelectedHelixKeys((prev) => {
       const next = new Set(prev);
@@ -249,23 +145,14 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
       return;
     }
 
-    // Extract helices ONCE per PDB (avoid React render loop)
+    // Compute helices ONCE per PDB (manual-only)
     if (!helicesComputedRef.current) {
-      let newHelices = null;
+      const manual = useManualMap ? buildHelicesFromManualMap(structureKey) : null;
 
-      if (useManualMap) {
-        newHelices = buildHelicesFromManualMap(structureKey);
-        if (!newHelices) {
-          // fall back silently to auto if manual missing
-          newHelices = extractHelicesFromModel(model);
-        }
-      } else {
-        newHelices = extractHelicesFromModel(model);
-      }
-
-      setHelices(newHelices);
+      setHelices(Array.isArray(manual) ? manual : []);
       helicesComputedRef.current = true;
     }
+
 
 
     const atoms = model.selectedAtoms();
@@ -406,7 +293,7 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
 
         .catch(() => setErr("Failed to load 3D structure from SMILES."));
     }
-  }, [pdbText, pdbFile, smiles, selectedHelixKeys, minHelixLen], useManualMap, structureKey, manualHelixMap);
+  }, [pdbText, pdbFile, smiles, selectedHelixKeys, useManualMap, structureKey, manualHelixMap]);
 
   const showStyleSelector = !(pdbText || pdbFile || pdbUrl);
 
@@ -439,24 +326,7 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
         </FormControl>
       )}
 
-      <Box sx={{ mb: 1 }}>
-        <Typography sx={{ color: "#aaa", fontSize: "0.85rem" }}>
-          Min helix length (residues)
-        </Typography>
 
-        <Select
-          size="small"
-          value={minHelixLen}
-          onChange={(e) => setMinHelixLen(Number(e.target.value))}
-          sx={{ color: "white", minWidth: 120 }}
-        >
-          {[4, 6, 8, 10, 12, 15, 20].map((v) => (
-            <MenuItem key={v} value={v}>
-              ≥ {v}
-            </MenuItem>
-          ))}
-        </Select>
-      </Box>
 
       <div style={{ width: "600px", marginBottom: "8px", color: "white" }}>
         <label style={{ display: "block", marginBottom: "6px" }}>
@@ -491,17 +361,10 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
       </div>
 
 
-      <div
-        style={{
-          color: "white",
-          background: "#333",
-          padding: "6px",
-          marginBottom: "6px",
-          fontSize: "0.9em",
-        }}
-      >
-        Helices detected (automatic): {helices.length}
-    </div>
+      <div style={{ color: "white", background: "#333", padding: "6px", marginBottom: "6px", fontSize: "0.9em" }}>
+        Helices loaded (manual): {helices.length}
+      </div>
+
 
 
       {helices.length > 0 && (
