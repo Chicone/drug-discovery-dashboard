@@ -41,6 +41,9 @@ function Docking() {
     size_z: 20,
   });
 
+  const [historyLimit, setHistoryLimit] = useState(1);
+
+
   const updateDockParam = (key, value) => {
     setDockParams((p) => ({ ...p, [key]: value }));
   };
@@ -66,9 +69,10 @@ function Docking() {
       }));
     };
 
-    const loadRunHistory = async () => {
+    const loadRunHistory = async (limit = 1) => {
       try {
-        const res = await fetch("/api/docking/runs");
+        const q = Number(limit) > 0 ? `?limit=${Number(limit)}` : "";
+        const res = await fetch(`/api/docking/runs${q}`);
         if (!res.ok) {
           console.error("Failed to fetch run history:", await res.text());
           return;
@@ -79,6 +83,7 @@ function Docking() {
         console.error("Failed to load run history:", err);
       }
     };
+
 
 
     const handleDocking = async () => {
@@ -116,7 +121,7 @@ function Docking() {
     }
 
     const data = await res.json();
-    loadRunHistory();
+    loadRunHistory(historyLimit);
 
 
     // data.poses is an array of { mode, score, pdb }
@@ -138,8 +143,9 @@ function Docking() {
     };
 
     useEffect(() => {
-      loadRunHistory();
-    }, []);
+      loadRunHistory(historyLimit);
+    }, [historyLimit]);
+
 
 
     const loadRun = async (runId) => {
@@ -751,9 +757,26 @@ function Docking() {
 
   {runHistory.length > 0 && (
       <Box sx={{ mt: 3 }}>
-        <Typography variant="subtitle1" sx={{ mb: 1 }}>
-          Docking run history
-        </Typography>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+          <Typography variant="subtitle1" sx={{ flex: 1 }}>
+            Docking run history
+          </Typography>
+
+          <TextField
+            label="History entries"
+            type="number"
+            size="small"
+            value={historyLimit}
+            inputProps={{ min: 1 }}
+            sx={{ width: 140 }}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (!Number.isFinite(n)) return;
+              setHistoryLimit(Math.max(1, Math.floor(n)));
+            }}
+          />
+        </Box>
+
 
         <Stack spacing={0.5}>
           {runHistory.map((run) => (

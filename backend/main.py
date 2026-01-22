@@ -735,8 +735,9 @@ async def dock_vina(
             content={"error": str(e)},
         )
 
+from fastapi import Query  # add near your other fastapi imports
 @app.get("/api/docking/runs")
-def list_docking_runs():
+def list_docking_runs(limit: int = Query(0, ge=0)):
     runs_dir = RUNS_DIR
     if not runs_dir.exists():
         return []
@@ -751,27 +752,31 @@ def list_docking_runs():
 
         try:
             data = json.loads(run_json.read_text(encoding="utf-8"))
-            scores = (
-                data.get("results", {})
-                    .get("scores", [])
-            )
+            scores = data.get("results", {}).get("scores", [])
             best = None
             numeric_scores = [s for s in scores if isinstance(s, (int, float))]
             if numeric_scores:
                 best = min(numeric_scores)
 
-            runs.append({
-                "run_id": data.get("run_id"),
-                "created_at": data.get("created_at"),
-                "ligand": data.get("ligand"),
-                "receptor": data.get("receptor"),
-                "best_score": best,
-            })
+            runs.append(
+                {
+                    "run_id": data.get("run_id"),
+                    "created_at": data.get("created_at"),
+                    "ligand": data.get("ligand"),
+                    "receptor": data.get("receptor"),
+                    "best_score": best,
+                }
+            )
         except Exception:
             continue
 
     runs.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+
+    # limit=0 means "no limit" (backward compatible)
+    if limit and limit > 0:
+        return runs[:limit]
     return runs
+
 
 def pdbqt_to_pdb_text(pdbqt_text: str) -> str:
     keep_prefixes = ("ATOM", "HETATM", "MODEL", "ENDMDL", "TER", "END", "REMARK")
