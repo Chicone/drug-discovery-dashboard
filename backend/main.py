@@ -6,8 +6,80 @@ from typing import Optional
 from pathlib import Path
 import json
 from typing import Any
+from functools import lru_cache
+import requests
+from functools import lru_cache
+
 import numpy as np
 from fastapi.responses import JSONResponse
+
+PDBe_UNIPROT_MAPPING_URL = (
+    "https://www.ebi.ac.uk/pdbe/api/mappings/uniprot/{pdb_id}"
+)
+
+@lru_cache(maxsize=32)
+def _fetch_pdbe_uniprot_mapping(pdb_id: str) -> dict:
+    url = PDBe_UNIPROT_MAPPING_URL.format(
+        pdb_id=pdb_id.lower(),
+    )
+    r = requests.get(url, timeout=20.0)
+    r.raise_for_status()
+    return r.json()
+
+
+
+
+def build_pdb_author_to_uniprot(pdbe_json: dict, pdb_id: str, accession: str) -> dict[int, int]:
+    """
+    Returns {author_resi: uniprot_resi} for a given PDB and UniProt accession.
+    This is the mapping you want if your viewer uses PDB residue numbers (atom.resi).
+    """
+    pdb_id = pdb_id.lower()
+    root = pdbe_json.get(pdb_id, {})
+    uniprot = root.get("UniProt", {})
+    acc_block = uniprot.get(accession, {})
+    mappings = acc_block.get("mappings", [])
+
+    out: dict[int, int] = {}
+
+    for m in mappings:
+        unp_start = int(m["unp_start"])
+        unp_end = int(m["unp_end"])
+
+        start_author = m["start"].get("author_residue_number")
+        end_author = m["end"].get("author_residue_number")
+
+        start_internal = int(m["start"]["residue_number"])
+        end_internal = int(m["end"]["residue_number"])
+
+        # Prefer author numbering (what your PDB/3Dmol uses)
+        if start_author is not None:
+            start_author = int(start_author)
+        else:
+            # fallback: derive author numbering using offset from internal numbering
+            start_author = start_internal
+
+        if end_author is not None:
+            end_author = int(end_author)
+        else:
+            # derive end_author using the same offset inferred at the start
+            offset = start_author - start_internal
+            end_author = end_internal + offset
+
+        # sanity: lengths must match
+        expected_len = unp_end - unp_start
+        got_len = end_author - start_author
+        if expected_len != got_len:
+            # If this triggers, something unusual is happening (insertions etc.)
+            # You can choose to raise, log, or still do best-effort mapping.
+            pass
+
+        for i in range(unp_end - unp_start + 1):
+            out[start_author + i] = unp_start + i
+
+    return out
+
+
 
 def _iter_pdbqt_atoms(pdbqt_text: str) -> list[dict[str, Any]]:
     atoms: list[dict[str, Any]] = []
@@ -176,8 +248,24 @@ def analyze_pose_contacts_from_files(
         },
     }
 
-
 app = FastAPI()
+
+
+
+@app.get("/api/pdb/{pdb_id}/pdb_to_uniprot")
+def pdb_to_uniprot_map(
+    pdb_id: str,
+    accession: str = "P29274",
+):
+    pdbe_json = _fetch_pdbe_uniprot_mapping(pdb_id)
+    mapping = build_pdb_author_to_uniprot(pdbe_json, pdb_id, accession)
+
+    return {
+        "pdb_id": pdb_id.lower(),
+        "accession": accession,
+        "pdb_to_uniprot": {str(k): v for k, v in mapping.items()},
+    }
+
 
 
 @app.get("/api/properties")
@@ -340,7 +428,6 @@ async def upload_pdb(file: UploadFile = File(...)):
 
 @app.get("/api/fetch_pdb")
 def fetch_pdb(pdb_id: str):
-    import requests
     url = f"https://files.rcsb.org/view/{pdb_id}.pdb"
     r = requests.get(url)
     if r.status_code != 200:
