@@ -28,15 +28,27 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
   const [err, setErr] = useState("");
 
   const [pickedAtom, setPickedAtom] = useState(null);
+  const [pdbToUniprot, setPdbToUniprot] = useState(null);
+  const [pdbToUniprotErr, setPdbToUniprotErr] = useState("");
+  const pdbToUniprotRef = useRef(null);
+  const [measureMode, setMeasureMode] = useState(false);
+
   // store the last 3D label so we can remove it cleanly
   const pickedLabelRef = useRef(null);
-
 
   // --- Helix selection state ---
   const [helices, setHelices] = useState([]);
   const [selectedHelixKeys, setSelectedHelixKeys] = useState(new Set());
 
   const helicesComputedRef = useRef(false);
+
+  const measureRef = useRef({
+    a: null,        // first picked atom object
+    aLabel: null,
+    line: null,
+    distLabel: null,
+  });
+
 
   const onManualMapFile = (file) => {
     if (!file) {
@@ -128,6 +140,39 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
 
   const clearHelices = () => setSelectedHelixKeys(new Set());
 
+  useEffect(() => {
+    // Choose which PDB ID to fetch mapping for:
+    // - If you loaded a manual map file, you set structureKey (e.g. "8PWN").
+    // - Otherwise fallback to "8pwn".
+    const pdbId = (structureKey || "8pwn").toLowerCase();
+
+    let cancelled = false;
+
+    async function loadMapping() {
+      setPdbToUniprotErr("");
+      try {
+        const r = await fetch(`/api/pdb/${pdbId}/pdb_to_uniprot`);
+        if (!r.ok) {
+          throw new Error(`HTTP ${r.status}`);
+        }
+        const j = await r.json();
+        if (!cancelled) {
+          setPdbToUniprot(j.pdb_to_uniprot || null);
+          pdbToUniprotRef.current = j.pdb_to_uniprot || null;
+        }
+      } catch (e) {
+        console.error("Failed to load PDB→UniProt mapping:", e);
+        if (!cancelled) {
+          setPdbToUniprot(null);
+          setPdbToUniprotErr("No residue mapping available for this structure.");
+        }
+      }
+    }
+
+    loadMapping();
+    return () => { cancelled = true; };
+  }, [structureKey]);
+
 
   useEffect(() => {
     if (!window.$3Dmol || !viewerRef.current) return;
@@ -199,6 +244,14 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
         backgroundOpacity: 0.8,
       });
 
+      // Compute UniProt (paper) residue number if mapping is available
+      const map = pdbToUniprotRef.current;
+      let paperResi = null;
+      if (map && atom.resi != null) {
+        paperResi = map[String(atom.resi)] ?? null;
+      }
+
+
       // Update React state for a UI panel
       setPickedAtom({
         chain,
@@ -207,7 +260,68 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
         atom: aname,
         elem: atom.elem || "",
         serial: atom.serial ?? null,
+        paperResi, // <-- NEW
       });
+
+      // --- distance measurement (2-click) ---
+      const m = measureRef.current;
+
+      // helper: remove previous graphics
+      const clearMeasure = () => {
+        if (m.aLabel) v.removeLabel(m.aLabel);
+        if (m.distLabel) v.removeLabel(m.distLabel);
+        if (m.line) v.removeShape(m.line);
+        m.a = null;
+        m.aLabel = null;
+        m.line = null;
+        m.distLabel = null;
+      };
+
+      const pos = { x: atom.x, y: atom.y, z: atom.z };
+
+      if (!m.a) {
+        // first point
+        clearMeasure();
+        m.a = { pos };
+        m.aLabel = v.addLabel("A", { position: pos, inFront: true });
+      } else {
+        // second point -> compute distance
+        const a = m.a.pos;
+        const dx = pos.x - a.x;
+        const dy = pos.y - a.y;
+        const dz = pos.z - a.z;
+        const d = Math.sqrt(dx*dx + dy*dy + dz*dz);
+
+        // remove "A" label now that we have both points
+        if (m.aLabel) {
+          v.removeLabel(m.aLabel);
+          m.aLabel = null;
+        }
+
+        // draw line
+        m.line = v.addCylinder({
+          start: a,
+          end: pos,
+          radius: 0.1,
+          color: "white",
+          fromCap: 1,
+          toCap: 1,
+          opacity: 0.9,
+        });
+
+        // label at midpoint
+        const mid = {
+          x: (a.x + pos.x) / 2,
+          y: (a.y + pos.y) / 2,
+          z: (a.z + pos.z) / 2
+        };
+        m.distLabel = v.addLabel(`${d.toFixed(2)} Å`, { position: mid, inFront: true });
+
+        // reset for next measurement
+        m.a = null;
+      }
+
+
 
       v.render();
     });
@@ -510,7 +624,8 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
           <Box sx={{ mt: 1, color: "#aaa", fontSize: "0.85rem" }}>
             {pickedAtom.serial != null && <div>Serial: {pickedAtom.serial}</div>}
             {pickedAtom.elem && <div>Element: {pickedAtom.elem}</div>}
-          </Box>
+            <div>UniProt: {pickedAtom.paperResi ?? "-"}</div>
+           </Box>
         )}
       </Box>
     </Box>
