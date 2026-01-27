@@ -11,9 +11,19 @@ import {
 } from "@mui/material";
 
 function MolecularDynamics() {
-  const fileInputRef = useRef(null);
+  const proteinInputRef = useRef(null);
+  const orthostericInputRef = useRef(null);
+  const allostericInputRef = useRef(null);
 
   const [proteinFile, setProteinFile] = useState(null);
+
+  // New: optional ligand inputs
+  const [orthostericFile, setOrthostericFile] = useState(null);
+  const [allostericPoseFile, setAllostericPoseFile] = useState(null);
+
+  // New: scenario selector
+  const [scenario, setScenario] = useState("protein_only");
+
   const [preset, setPreset] = useState("cg_popc_50ns");
   const [jobId, setJobId] = useState(null);
   const [status, setStatus] = useState(null);
@@ -31,11 +41,42 @@ function MolecularDynamics() {
     []
   );
 
+  const scenarios = useMemo(
+    () => [
+      { id: "protein_only", label: "Protein only" },
+      { id: "protein_plus_orthosteric", label: "Protein + orthosteric ligand" },
+      {
+        id: "protein_plus_orthosteric_plus_allosteric",
+        label: "Protein + orthosteric + allosteric (pose)",
+      },
+    ],
+    []
+  );
+
   async function createJob() {
     setError(null);
 
     if (!proteinFile) {
       setError("Please select a PDB file first.");
+      return;
+    }
+
+    // Basic validation for scenarios
+    if (
+      scenario === "protein_plus_orthosteric" &&
+      !orthostericFile
+    ) {
+      setError("Scenario requires an orthosteric ligand file.");
+      return;
+    }
+
+    if (
+      scenario === "protein_plus_orthosteric_plus_allosteric" &&
+      (!orthostericFile || !allostericPoseFile)
+    ) {
+      setError(
+        "Scenario requires both an orthosteric ligand file and an allosteric pose file."
+      );
       return;
     }
 
@@ -49,6 +90,16 @@ function MolecularDynamics() {
       const form = new FormData();
       form.append("protein_pdb", proteinFile);
       form.append("preset", preset);
+
+      // New fields
+      form.append("scenario", scenario);
+
+      if (orthostericFile) {
+        form.append("orthosteric_ligand", orthostericFile);
+      }
+      if (allostericPoseFile) {
+        form.append("allosteric_pose", allostericPoseFile);
+      }
 
       const res = await fetch("/api/md/jobs", {
         method: "POST",
@@ -74,16 +125,20 @@ function MolecularDynamics() {
     }
   }
 
+  // FIX: stop polling based on the latest fetched status, not stale React state
   async function pollJob(id) {
-    // Simple polling MVP: status + log + files every 2s
     const intervalMs = 2000;
+    let timer = null;
 
     async function tick() {
+      let latestStatus = null;
+
       try {
         const sRes = await fetch(`/api/md/jobs/${id}`);
         if (sRes.ok) {
           const s = await sRes.json();
-          setStatus(s.status);
+          latestStatus = s.status;
+          setStatus(latestStatus);
         }
 
         const lRes = await fetch(`/api/md/jobs/${id}/log`);
@@ -98,25 +153,31 @@ function MolecularDynamics() {
           setFiles(f.files || []);
         }
       } catch (e) {
-        // Non-fatal: keep polling, but show last error
         setError((prev) => prev || (e.message || String(e)));
+      }
+
+      if (latestStatus === "done" || latestStatus === "error") {
+        if (timer) clearInterval(timer);
       }
     }
 
     await tick();
-
-    const timer = setInterval(async () => {
-      await tick();
-      // stop polling if finished
-      if (status === "done" || status === "error") {
-        clearInterval(timer);
-      }
-    }, intervalMs);
+    timer = setInterval(tick, intervalMs);
   }
 
-  function onPickFile(e) {
+  function onPickProtein(e) {
     const f = e.target.files?.[0] || null;
     setProteinFile(f);
+  }
+
+  function onPickOrthosteric(e) {
+    const f = e.target.files?.[0] || null;
+    setOrthostericFile(f);
+  }
+
+  function onPickAllostericPose(e) {
+    const f = e.target.files?.[0] || null;
+    setAllostericPoseFile(f);
   }
 
   const canRun = !!proteinFile && !isSubmitting;
@@ -135,31 +196,93 @@ function MolecularDynamics() {
       </Typography>
 
       <Typography variant="body1" sx={{ mb: 2 }}>
-        Upload a protein PDB, choose a preset, and launch a CG MD job
+        Upload a protein PDB, choose a preset and scenario, and launch a CG MD job
         (GROMACS + Martini in Docker).
       </Typography>
 
       <Stack spacing={2}>
+        {/* Protein */}
         <Stack direction="row" spacing={2} alignItems="center">
           <Button
             variant="contained"
             color="secondary"
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => proteinInputRef.current?.click()}
           >
             Select PDB
           </Button>
           <input
-            ref={fileInputRef}
+            ref={proteinInputRef}
             type="file"
             accept=".pdb,.ent"
             style={{ display: "none" }}
-            onChange={onPickFile}
+            onChange={onPickProtein}
           />
           <Typography variant="body2" sx={{ color: "#aaa" }}>
             {proteinFile ? proteinFile.name : "No file selected"}
           </Typography>
         </Stack>
 
+        {/* Scenario */}
+        <TextField
+          select
+          label="Scenario"
+          value={scenario}
+          onChange={(e) => setScenario(e.target.value)}
+          size="small"
+          sx={{ maxWidth: 520 }}
+        >
+          {scenarios.map((s) => (
+            <MenuItem key={s.id} value={s.id}>
+              {s.label}
+            </MenuItem>
+          ))}
+        </TextField>
+
+        {/* Orthosteric ligand */}
+        <Stack direction="row" spacing={2} alignItems="center">
+          <Button
+            variant="outlined"
+            color="secondary"
+            onClick={() => orthostericInputRef.current?.click()}
+            disabled={scenario === "protein_only"}
+          >
+            Select orthosteric ligand
+          </Button>
+          <input
+            ref={orthostericInputRef}
+            type="file"
+            accept=".pdb,.sdf,.mol2,.pdbqt"
+            style={{ display: "none" }}
+            onChange={onPickOrthosteric}
+          />
+          <Typography variant="body2" sx={{ color: "#aaa" }}>
+            {orthostericFile ? orthostericFile.name : "Optional (depends on scenario)"}
+          </Typography>
+        </Stack>
+
+        {/* Allosteric pose */}
+        <Stack direction="row" spacing={2} alignItems="center">
+          <Button
+            variant="outlined"
+            color="secondary"
+            onClick={() => allostericInputRef.current?.click()}
+            disabled={scenario !== "protein_plus_orthosteric_plus_allosteric"}
+          >
+            Select allosteric pose
+          </Button>
+          <input
+            ref={allostericInputRef}
+            type="file"
+            accept=".pdb,.pdbqt,.sdf,.mol2"
+            style={{ display: "none" }}
+            onChange={onPickAllostericPose}
+          />
+          <Typography variant="body2" sx={{ color: "#aaa" }}>
+            {allostericPoseFile ? allostericPoseFile.name : "Optional (depends on scenario)"}
+          </Typography>
+        </Stack>
+
+        {/* Preset */}
         <TextField
           select
           label="Preset"
@@ -176,11 +299,7 @@ function MolecularDynamics() {
         </TextField>
 
         <Stack direction="row" spacing={2}>
-          <Button
-            variant="outlined"
-            onClick={createJob}
-            disabled={!canRun}
-          >
+          <Button variant="outlined" onClick={createJob} disabled={!canRun}>
             Run simulation
           </Button>
 
