@@ -1047,6 +1047,47 @@ def _md_status_from_dir(job_dir: Path) -> str:
         return "error"
     return "running"
 
+def _validate_md_inputs_or_raise(job_dir: Path) -> None:
+    """
+    Fail fast with a clear message if the job inputs are not supported yet.
+    Currently, ligand inputs as SMILES (.smi/.smiles/.txt) are not supported
+    by the MD runner because they lack 3D coordinates and Martini parameters.
+    """
+    input_dir = job_dir / "input"
+    params_path = input_dir / "params.json"
+    if not params_path.exists():
+        return  # legacy jobs
+
+    params = json.loads(params_path.read_text(encoding="utf-8"))
+    files = (params.get("files") or {})
+    scenario = params.get("scenario")
+
+    def is_smiles(fname: Optional[str]) -> bool:
+        if not fname:
+            return False
+        s = fname.lower()
+        return s.endswith(".smi") or s.endswith(".smiles") or s.endswith(".txt")
+
+    orth = files.get("orthosteric_ligand")
+    allo = files.get("allosteric_pose")
+
+    if is_smiles(orth) or is_smiles(allo):
+        msg = (
+            "ERROR: Ligand input provided as SMILES (.smi/.smiles/.txt).\n"
+            "This MD pipeline currently requires 3D ligand coordinates "
+            "(SDF/MOL2/PDBQT/PDB) AND a Martini topology (.itp) for each ligand.\n"
+            f"Scenario: {scenario}\n"
+            f"Orthosteric ligand: {orth}\n"
+            f"Allosteric pose: {allo}\n"
+            "Next: upload a docking pose file (PDBQT/SDF/MOL2) for the allosteric "
+            "ligand and a 3D structure file for the orthosteric ligand, or implement "
+            "SMILES->3D preparation + Martini parametrisation.\n"
+        )
+        # Write log + status so frontend shows something meaningful
+        (job_dir / "log.txt").write_text(msg, encoding="utf-8")
+        _write_json(job_dir / "status.json", {"status": "error"})
+        raise RuntimeError("Unsupported ligand input: SMILES file")
+
 
 def _launch_md_docker(job_dir: Path) -> None:
     """
@@ -1062,6 +1103,8 @@ def _launch_md_docker(job_dir: Path) -> None:
     """
     # IMPORTANT: This runs Docker from the host. For Docker-in-Docker,
     # you would need the Docker socket mounted into the backend container.
+    _validate_md_inputs_or_raise(job_dir)
+
     cmd = [
         "docker", "run", "--rm",
         "-v", f"{str(job_dir)}:/job",
