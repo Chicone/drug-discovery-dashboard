@@ -1078,8 +1078,43 @@ def _launch_md_docker(job_dir: Path) -> None:
 async def create_md_job(
     protein_pdb: UploadFile = File(...),
     preset: str = Form("cg_popc_50ns"),
+
+    # NEW:
+    scenario: str = Form("protein_only"),
+    orthosteric_ligand: Optional[UploadFile] = File(None),
+    allosteric_pose: Optional[UploadFile] = File(None),
 ):
     try:
+        allowed_scenarios = {
+            "protein_only",
+            "protein_plus_orthosteric",
+            "protein_plus_orthosteric_plus_allosteric",
+        }
+        if scenario not in allowed_scenarios:
+            return JSONResponse(
+                status_code=400,
+                content={"error": f"Invalid scenario: {scenario}"},
+            )
+
+        # Validate scenario requirements
+        if scenario == "protein_plus_orthosteric" and orthosteric_ligand is None:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Scenario requires orthosteric_ligand"},
+            )
+
+        if scenario == "protein_plus_orthosteric_plus_allosteric":
+            if orthosteric_ligand is None or allosteric_pose is None:
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "error": (
+                            "Scenario requires orthosteric_ligand "
+                            "and allosteric_pose"
+                        )
+                    },
+                )
+
         MD_RUNS_DIR.mkdir(parents=True, exist_ok=True)
 
         job_id = str(uuid.uuid4())
@@ -1091,10 +1126,28 @@ async def create_md_job(
         _safe_mkdir(input_dir)
         _safe_mkdir(out_dir)
 
+        # --- Save protein ---
         pdb_path = input_dir / "protein.pdb"
         protein_pdb.file.seek(0)
         with open(pdb_path, "wb") as f:
             shutil.copyfileobj(protein_pdb.file, f)
+
+        # --- Save optional ligands ---
+        orth_path = None
+        if orthosteric_ligand is not None:
+            orth_name = Path(orthosteric_ligand.filename).name
+            orth_path = input_dir / orth_name
+            orthosteric_ligand.file.seek(0)
+            with open(orth_path, "wb") as f:
+                shutil.copyfileobj(orthosteric_ligand.file, f)
+
+        allo_path = None
+        if allosteric_pose is not None:
+            allo_name = Path(allosteric_pose.filename).name
+            allo_path = input_dir / allo_name
+            allosteric_pose.file.seek(0)
+            with open(allo_path, "wb") as f:
+                shutil.copyfileobj(allosteric_pose.file, f)
 
         created_at = datetime.now(
             ZoneInfo("Europe/Paris")
@@ -1104,7 +1157,12 @@ async def create_md_job(
             "job_id": job_id,
             "created_at": created_at,
             "preset": preset,
+            "scenario": scenario,
             "protein_filename": protein_pdb.filename,
+            "orthosteric_filename": orthosteric_ligand.filename
+            if orthosteric_ligand is not None else None,
+            "allosteric_pose_filename": allosteric_pose.filename
+            if allosteric_pose is not None else None,
         }
         _write_json(job_dir / "run.json", run_record)
 
@@ -1112,8 +1170,16 @@ async def create_md_job(
         _write_json(job_dir / "status.json", {"status": "queued"})
         (job_dir / "log.txt").write_text("", encoding="utf-8")
 
-        # Save params for container
-        params = {"preset": preset}
+        # Save params for container (future-proof for your md-runner)
+        params = {
+            "preset": preset,
+            "scenario": scenario,
+            "files": {
+                "protein_pdb": "protein.pdb",
+                "orthosteric_ligand": orth_path.name if orth_path else None,
+                "allosteric_pose": allo_path.name if allo_path else None,
+            },
+        }
         _write_json(input_dir / "params.json", params)
 
         # Launch container
@@ -1126,6 +1192,7 @@ async def create_md_job(
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
+
 
 
 @app.get("/api/md/jobs")
