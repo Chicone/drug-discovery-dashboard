@@ -1,0 +1,9 @@
+{
+  "job_id": "309844d7-c307-4a3a-89dc-b5e2ea8a28b1",
+  "created_at": "2026-01-27T18:17:35+01:00",
+  "preset": "cg_popc_50ns",
+  "scenario": "protein_plus_orthosteric_plus_allosteric",
+  "protein_filename": "2YDV_clean.pdb",
+  "orthosteric_filename": "NECA.smi",
+  "allosteric_pose_filename": "zm241385.smi"
+}

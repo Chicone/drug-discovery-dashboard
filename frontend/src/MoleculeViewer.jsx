@@ -584,8 +584,10 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
       <div
         ref={viewerRef}
         style={{
-          width: "600px",
-          height: "600px",
+          width: "100%",
+          maxWidth: "1000px",
+          minWidth: "500px",
+          height: "800px",
           border: "1px solid #555",
           borderRadius: "6px",
           background: "#111",
