@@ -251,7 +251,7 @@ function MolecularDynamics() {
           <input
             ref={orthostericInputRef}
             type="file"
-            accept=".pdb,.sdf,.mol2,.pdbqt"
+            accept=".pdb,.sdf,.mol2,.pdbqt,.smi,.smiles,.txt"
             style={{ display: "none" }}
             onChange={onPickOrthosteric}
           />
@@ -273,7 +273,7 @@ function MolecularDynamics() {
           <input
             ref={allostericInputRef}
             type="file"
-            accept=".pdb,.pdbqt,.sdf,.mol2"
+            accept=".pdb,.pdbqt,.sdf,.mol2,.smi,.smiles,.txt"
             style={{ display: "none" }}
             onChange={onPickAllostericPose}
           />
