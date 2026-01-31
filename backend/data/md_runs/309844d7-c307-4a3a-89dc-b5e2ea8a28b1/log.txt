@@ -1,6 +1,0 @@
-ERROR: Ligand input provided as SMILES (.smi/.smiles/.txt).
-This MD pipeline currently requires 3D ligand coordinates (SDF/MOL2/PDBQT/PDB) AND a Martini topology (.itp) for each ligand.
-Scenario: protein_plus_orthosteric_plus_allosteric
-Orthosteric ligand: NECA.smi
-Allosteric pose: zm241385.smi
-Next: upload a docking pose file (PDBQT/SDF/MOL2) for the allosteric ligand and a 3D structure file for the orthosteric ligand, or implement SMILES->3D preparation + Martini parametrisation.

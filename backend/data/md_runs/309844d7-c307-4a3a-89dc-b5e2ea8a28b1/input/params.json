@@ -1,9 +1,0 @@
-{
-  "preset": "cg_popc_50ns",
-  "scenario": "protein_plus_orthosteric_plus_allosteric",
-  "files": {
-    "protein_pdb": "protein.pdb",
-    "orthosteric_ligand": "NECA.smi",
-    "allosteric_pose": "zm241385.smi"
-  }
-}
