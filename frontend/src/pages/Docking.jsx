@@ -7,7 +7,8 @@ import {
   Stack,
   LinearProgress,
   Divider,
-    Tooltip,
+  Tooltip,
+  MenuItem,
 } from "@mui/material";
 
 import MoleculeViewer from "../MoleculeViewer";
@@ -27,6 +28,11 @@ function Docking() {
   const [poses, setPoses] = useState([]);
   const [selectedPoseIdx, setSelectedPoseIdx] = useState(0);
   const [boxFile, setBoxFile] = useState(null);
+  const [mdJobId, setMdJobId] = useState(null);
+  const [mdPreset, setMdPreset] = useState("cg_popc_50ns");
+  const [mdLaunching, setMdLaunching] = useState(false);
+  const [mdError, setMdError] = useState(null);
+
   const [dockParams, setDockParams] = useState({
     num_modes: 10,
     exhaustiveness: 8,
@@ -85,62 +91,103 @@ function Docking() {
     };
 
 
-
     const handleDocking = async () => {
-    if (!receptorFile || !ligandFile) {
-      setError("Please upload both receptor and ligand files.");
-      return;
-    }
+        if (!receptorFile || !ligandFile) {
+          setError("Please upload both receptor and ligand files.");
+          return;
+        }
 
-    setLoading(true);
-    setError("");
-    setPdbText("");
+        setLoading(true);
+        setError("");
+        setPdbText("");
 
-    const formData = new FormData();
-    formData.append("receptor", receptorFile);
-    formData.append("ligand", ligandFile);
-    formData.append("num_modes", dockParams.num_modes);
-    formData.append("exhaustiveness", dockParams.exhaustiveness);
-    formData.append("cpu", dockParams.cpu);
-    formData.append("center_x", dockParams.center_x);
-    formData.append("center_y", dockParams.center_y);
-    formData.append("center_z", dockParams.center_z);
-    formData.append("size_x", dockParams.size_x);
-    formData.append("size_y", dockParams.size_y);
-    formData.append("size_z", dockParams.size_z);
+        const formData = new FormData();
+        formData.append("receptor", receptorFile);
+        formData.append("ligand", ligandFile);
+        formData.append("num_modes", dockParams.num_modes);
+        formData.append("exhaustiveness", dockParams.exhaustiveness);
+        formData.append("cpu", dockParams.cpu);
+        formData.append("center_x", dockParams.center_x);
+        formData.append("center_y", dockParams.center_y);
+        formData.append("center_z", dockParams.center_z);
+        formData.append("size_x", dockParams.size_x);
+        formData.append("size_y", dockParams.size_y);
+        formData.append("size_z", dockParams.size_z);
 
-    try {
-    const res = await fetch("/api/dock_vina", {
-      method: "POST",
-      body: formData,
-    });
+        try {
+        const res = await fetch("/api/dock_vina", {
+          method: "POST",
+          body: formData,
+        });
 
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(errText || "Docking failed");
-    }
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(errText || "Docking failed");
+        }
 
-    const data = await res.json();
-    loadRunHistory(historyLimit);
+        const data = await res.json();
+        setSelectedRunId(data.run_id);
+        loadRunHistory(historyLimit);
 
 
-    // data.poses is an array of { mode, score, pdb }
-    if (!data.poses || data.poses.length === 0) {
-      setError("Docking completed but returned no poses.");
-      return;
-    }
+        // data.poses is an array of { mode, score, pdb }
+        if (!data.poses || data.poses.length === 0) {
+          setError("Docking completed but returned no poses.");
+          return;
+        }
 
-    setPoses(data.poses);
-    setSelectedPoseIdx(0);
-    setPdbText(data.poses[0].pdb);
+        setPoses(data.poses);
+        setSelectedPoseIdx(0);
+        setPdbText(data.poses[0].pdb);
 
-    } catch (err) {
-      console.error("Docking error:", err);
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+        } catch (err) {
+          console.error("Docking error:", err);
+          setError(err.message);
+        } finally {
+          setLoading(false);
+        }
     };
+
+    async function runMdFromDocking() {
+      setMdError(null);
+      setMdJobId(null);
+
+      if (!selectedRunId) {
+        setMdError("No docking run selected. Run docking or click a run in history.");
+        return;
+      }
+
+      if (selectedPoseIdx == null) {
+        setMdError("No pose selected.");
+        return;
+      }
+
+      setMdLaunching(true);
+      try {
+        const form = new FormData();
+        form.append("run_id", selectedRunId);
+        form.append("pose_idx", String(selectedPoseIdx));
+        form.append("preset", mdPreset);
+
+        const res = await fetch("/api/md/from_docking", {
+          method: "POST",
+          body: form,
+        });
+
+        if (!res.ok) {
+          const txt = await res.text();
+          throw new Error(txt || `Failed to start MD (${res.status})`);
+        }
+
+        const data = await res.json();
+        setMdJobId(data.job_id || null);
+      } catch (e) {
+        setMdError(e.message || String(e));
+      } finally {
+        setMdLaunching(false);
+      }
+    }
+
 
     useEffect(() => {
       loadRunHistory(historyLimit);
@@ -754,6 +801,50 @@ function Docking() {
       </Box>
     </Box>
   )}
+    {poses.length > 0 && (
+      <Box sx={{ mt: 2 }}>
+        <Typography variant="subtitle1" sx={{ mb: 1 }}>
+          Molecular dynamics
+        </Typography>
+
+        <Box sx={{ display: "flex", gap: 1, alignItems: "center", flexWrap: "wrap" }}>
+          <TextField
+            select
+            label="MD preset"
+            size="small"
+            value={mdPreset}
+            onChange={(e) => setMdPreset(e.target.value)}
+            sx={{ minWidth: 220 }}
+          >
+            <MenuItem value="cg_popc_50ns">CG Martini: POPC, 50 ns</MenuItem>
+            <MenuItem value="cg_popc_200ns">CG Martini: POPC, 200 ns</MenuItem>
+            <MenuItem value="cg_popc_chol_50ns">CG Martini: POPC+CHOL, 50 ns</MenuItem>
+          </TextField>
+
+          <Button
+            variant="contained"
+            color="secondary"
+            onClick={runMdFromDocking}
+            disabled={mdLaunching || !selectedRunId}
+          >
+            {mdLaunching ? "Starting..." : "Run MD for this pose"}
+          </Button>
+        </Box>
+
+        {mdJobId && (
+          <Typography variant="body2" sx={{ color: "#aaa", mt: 1 }}>
+            MD job started: <strong>{mdJobId}</strong>. Open the Molecular Dynamics tab
+            and click it in “Recent MD jobs”.
+          </Typography>
+        )}
+
+        {mdError && (
+          <Typography variant="body2" sx={{ color: "#ff8080", mt: 1 }}>
+            {mdError}
+          </Typography>
+        )}
+      </Box>
+    )}
 
   {runHistory.length > 0 && (
       <Box sx={{ mt: 3 }}>

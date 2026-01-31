@@ -8,10 +8,18 @@ import json
 from typing import Any
 from functools import lru_cache
 import requests
+import sys
 from functools import lru_cache
+from pipelines.pipeline import main as run_pipeline
 
 import numpy as np
 from fastapi.responses import JSONResponse
+
+PIPELINE_BY_WORKFLOW = {
+    "build_only": "backend.pipelines.build_system",
+    "build_and_equilibrate": "backend.pipelines.build_and_equilibrate",
+    "run_md": "backend.pipelines.production",
+}
 
 PDBe_UNIPROT_MAPPING_URL = (
     "https://www.ebi.ac.uk/pdbe/api/mappings/uniprot/{pdb_id}"
@@ -25,8 +33,6 @@ def _fetch_pdbe_uniprot_mapping(pdb_id: str) -> dict:
     r = requests.get(url, timeout=20.0)
     r.raise_for_status()
     return r.json()
-
-
 
 
 def build_pdb_author_to_uniprot(pdbe_json: dict, pdb_id: str, accession: str) -> dict[int, int]:
@@ -79,6 +85,65 @@ def build_pdb_author_to_uniprot(pdbe_json: dict, pdb_id: str, accession: str) ->
 
     return out
 
+def _extract_orthosteric_from_pdb(
+    pdb_in: Path,
+    protein_out: Path,
+    orth_out: Path,
+) -> dict:
+    """
+    Split a PDB into:
+      - protein_out: ATOM records (+ TER/END)
+      - orth_out:    HETATM records for "ligand-like" residues
+    Excludes common waters/ions from the ligand file.
+
+    Returns a small summary dict.
+    """
+    exclude_resnames = {
+        "HOH", "WAT", "DOD",
+        "NA", "K", "CL", "CA", "MG", "ZN", "MN", "FE", "CU",
+        "CO", "NI", "CD", "HG", "BR", "I",
+        "SO4", "PO4",
+        # add more if needed
+    }
+
+    atom_lines = []
+    het_lines = []
+    conect_lines = []
+
+    for line in pdb_in.read_text(encoding="utf-8", errors="replace").splitlines(True):
+        rec = line[:6].strip()
+
+        if rec == "ATOM":
+            atom_lines.append(line)
+            continue
+
+        if rec == "HETATM":
+            # PDB fixed columns: resname at 18-20 (0-based 17:20)
+            resname = line[17:20].strip().upper()
+            if resname and resname not in exclude_resnames:
+                het_lines.append(line)
+            continue
+
+        if rec == "CONECT":
+            conect_lines.append(line)
+            continue
+
+        # Keep TER/END in protein file if present
+        if rec in {"TER", "END", "ENDMDL"}:
+            atom_lines.append(line)
+            continue
+
+    protein_out.write_text("".join(atom_lines) + "\n", encoding="utf-8")
+
+    # Include CONECT if you want (harmless, sometimes helpful)
+    orth_text = "".join(het_lines + conect_lines).strip() + "\n"
+    orth_out.write_text(orth_text, encoding="utf-8")
+
+    return {
+        "protein_atoms_lines": len(atom_lines),
+        "orth_hetatm_lines": len(het_lines),
+        "conect_lines": len(conect_lines),
+    }
 
 
 def _iter_pdbqt_atoms(pdbqt_text: str) -> list[dict[str, Any]]:
@@ -766,6 +831,10 @@ async def dock_vina(
         receptor_pdbqt_out = run_dir / "receptor.pdbqt"
         shutil.copyfile(rec_pdbqt, receptor_pdbqt_out)
 
+        # ALSO save the original receptor PDB so MD can use it
+        receptor_pdb_out = run_dir / "receptor.pdb"
+        shutil.copyfile(rec_pdb, receptor_pdb_out)
+
         scores = [p.get("score") for p in poses]
 
         if best_score is None:
@@ -1089,32 +1158,126 @@ def _validate_md_inputs_or_raise(job_dir: Path) -> None:
         raise RuntimeError("Unsupported ligand input: SMILES file")
 
 
+import subprocess
+import threading
+
+def _append_log(job_dir: Path, line: str) -> None:
+    with open(job_dir / "log.txt", "a", encoding="utf-8") as f:
+        f.write(line)
+
+def _run_and_stream(job_dir: Path, cmd: list[str], cwd: Path, env=None) -> int:
+    _append_log(job_dir, "\n$ " + " ".join(cmd) + "\n")
+
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(cwd),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        _append_log(job_dir, line)
+
+    return proc.wait()
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]  # adjust if needed
+# If this file is backend/md/runners/md_local.py then parents[2] -> .../ddd
+
+def _launch_md_local(job_dir: Path) -> None:
+    input_dir = job_dir / "input"
+    params = json.loads((input_dir / "params.json").read_text(encoding="utf-8"))
+
+    workflow = params.get("workflow", "full")
+    module = PIPELINE_BY_WORKFLOW.get(workflow)
+    if module is None:
+        raise ValueError(f"Unknown workflow: {workflow}")
+
+    cmd = [sys.executable, "-m", module, "--job-dir", str(job_dir)]
+
+    out_dir = job_dir / "out"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(PROJECT_ROOT) + (
+        (":" + env["PYTHONPATH"]) if env.get("PYTHONPATH") else ""
+    )
+
+    _write_json(job_dir / "status.json", {"status": "running"})
+
+    def worker():
+        try:
+            # IMPORTANT: cwd must be project root for -m backend... to work
+            code = _run_and_stream(job_dir, cmd, cwd=PROJECT_ROOT, env=env)
+            _write_json(job_dir / "status.json",
+                        {"status": "done" if code == 0 else "error"})
+        except Exception as e:
+            _append_log(job_dir, f"\nERROR: {e}\n")
+            _write_json(job_dir / "status.json", {"status": "error"})
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
 def _launch_md_docker(job_dir: Path) -> None:
     """
     Launch MD runner container asynchronously.
-    Expects an image named: md-runner:latest
-
-    Container contract:
-      - Reads:  /job/input/protein.pdb
-      - Reads:  /job/input/params.json
-      - Writes: /job/log.txt
-      - Writes: /job/status.json (optional but recommended)
-      - Writes: /job/out/* (outputs)
+    Writes stdout/stderr into log.txt so the UI can see it.
+    If Docker fails, mark status as 'error'.
     """
-    # IMPORTANT: This runs Docker from the host. For Docker-in-Docker,
-    # you would need the Docker socket mounted into the backend container.
     _validate_md_inputs_or_raise(job_dir)
+
+    log_path = job_dir / "log.txt"
 
     cmd = [
         "docker", "run", "--rm",
         "-v", f"{str(job_dir)}:/job",
-        "md-runner:latest",
+        "md-runner:arm64",
     ]
-    subprocess.Popen(
-        cmd,
+
+    # Log the docker command we are about to run
+    with open(log_path, "a", encoding="utf-8") as lf:
+        lf.write("Launching Docker:\n")
+        lf.write("  " + " ".join(cmd) + "\n\n")
+
+    try:
+        # Check docker is available
+        subprocess.run(
+            ["docker", "version"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        )
+
+        # Check the md-runner image exists
+        subprocess.run(
+            ["docker", "image", "inspect", "md-runner:arm64"],
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+            stderr=subprocess.DEVNULL,
+            check=True,
+        )
+
+        # Launch the container and stream logs to log.txt
+        lf = open(log_path, "a", encoding="utf-8")
+        subprocess.Popen(
+            cmd,
+            stdout=lf,
+            stderr=lf,
+        )
+
+    except Exception as e:
+        # Write error to log and mark status
+        with open(log_path, "a", encoding="utf-8") as lf2:
+            lf2.write("\nERROR: Failed to launch Docker\n")
+            lf2.write(str(e) + "\n")
+
+        _write_json(job_dir / "status.json", {"status": "error"})
+        raise
+
+
 
 
 @app.post("/api/md/jobs")
@@ -1124,6 +1287,9 @@ async def create_md_job(
 
     # NEW:
     scenario: str = Form("protein_only"),
+    environment: str = Form("membrane"),  # "membrane" | "solvated_box"
+    workflow: str = Form("build_only"),  # "build_only" | "equilibrate" | "full"
+    parent_job_id: Optional[str] = Form(None),
     orthosteric_ligand: Optional[UploadFile] = File(None),
     allosteric_pose: Optional[UploadFile] = File(None),
 ):
@@ -1138,25 +1304,46 @@ async def create_md_job(
                 status_code=400,
                 content={"error": f"Invalid scenario: {scenario}"},
             )
+        allowed_env = {"membrane", "solvated_box"}
+        if environment not in allowed_env:
+            return JSONResponse(status_code=400,
+                                content={"error": f"Invalid environment: {environment}"})
 
-        # Validate scenario requirements
-        if scenario == "protein_plus_orthosteric" and orthosteric_ligand is None:
+        allowed_workflow = {
+            "build_only",
+            "build_and_equilibrate",
+            "run_md",
+        }
+        if workflow not in allowed_workflow:
+            return JSONResponse(status_code=400,
+                                content={"error": f"Invalid workflow: {workflow}"})
+
+        if workflow == "run_md" and not parent_job_id:
             return JSONResponse(
                 status_code=400,
-                content={"error": "Scenario requires orthosteric_ligand"},
+                content={"error": "run_md requires parent_job_id"},
             )
 
+        if workflow == "run_md":
+            parent_dir = _md_job_dir(parent_job_id)
+            if not parent_dir.exists():
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": "parent_job_id not found"},
+                )
+
+        # Validate scenario requirements (Option A: orthosteric can be extracted)
+        if scenario == "protein_plus_orthosteric" and orthosteric_ligand is None:
+            # allowed: we'll try to extract after saving protein.pdb
+            pass
+
         if scenario == "protein_plus_orthosteric_plus_allosteric":
-            if orthosteric_ligand is None or allosteric_pose is None:
+            if allosteric_pose is None:
                 return JSONResponse(
                     status_code=400,
-                    content={
-                        "error": (
-                            "Scenario requires orthosteric_ligand "
-                            "and allosteric_pose"
-                        )
-                    },
+                    content={"error": "Scenario requires allosteric_pose"},
                 )
+            # orthosteric_ligand may be None -> extracted from protein.pdb
 
         MD_RUNS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -1169,20 +1356,90 @@ async def create_md_job(
         _safe_mkdir(input_dir)
         _safe_mkdir(out_dir)
 
+        # -------------------------------------------------
+        # Inherit built system for production runs
+        # -------------------------------------------------
+        if workflow == "run_md":
+            parent_dir = _md_job_dir(parent_job_id)
+            parent_out = parent_dir / "out"
+
+            required_files = [
+                "system.top",
+                "npt.gro",
+            ]
+
+            for fname in required_files:
+                src = parent_out / fname
+                dst = out_dir / fname
+
+                if not src.exists():
+                    return JSONResponse(
+                        status_code=400,
+                        content={"error": f"Missing {fname} in parent job"},
+                    )
+
+                shutil.copy2(src, dst)
+
+            # Copy all topology include files (*.itp)
+            for itp in parent_out.glob("*.itp"):
+                shutil.copy2(itp, out_dir / itp.name)
+
         # --- Save protein ---
         pdb_path = input_dir / "protein.pdb"
+
+        # Always save uploaded PDB first
         protein_pdb.file.seek(0)
         with open(pdb_path, "wb") as f:
             shutil.copyfileobj(protein_pdb.file, f)
 
-        # --- Save optional ligands ---
         orth_path = None
+        orth_extracted = False
+        extract_summary = None
+
+        needs_orth = scenario in {
+            "protein_plus_orthosteric",
+            "protein_plus_orthosteric_plus_allosteric",
+        }
+
+        # Option A: extract orthosteric from uploaded protein.pdb if not provided
+        if needs_orth and orthosteric_ligand is None:
+            original_with_ligands = input_dir / "protein_with_ligands.pdb"
+            shutil.copyfile(pdb_path, original_with_ligands)
+
+            extracted_orth = input_dir / "orthosteric_extracted.pdb"
+
+            extract_summary = _extract_orthosteric_from_pdb(
+                pdb_in=original_with_ligands,
+                protein_out=pdb_path,  # overwrite protein.pdb as protein-only
+                orth_out=extracted_orth,
+            )
+
+            if extract_summary.get("orth_hetatm_lines", 0) <= 0:
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "error": (
+                            "No orthosteric ligand found in uploaded protein PDB. "
+                            "Upload orthosteric_ligand or provide a receptor PDB "
+                            "containing the orthosteric as HETATM."
+                        )
+                    },
+                )
+
+            orth_path = extracted_orth
+            orth_extracted = True
+
+        # If orthosteric ligand explicitly uploaded, save it and prefer it
         if orthosteric_ligand is not None:
             orth_name = Path(orthosteric_ligand.filename).name
             orth_path = input_dir / orth_name
             orthosteric_ligand.file.seek(0)
             with open(orth_path, "wb") as f:
                 shutil.copyfileobj(orthosteric_ligand.file, f)
+
+        protein_pdb.file.seek(0)
+        with open(pdb_path, "wb") as f:
+            shutil.copyfileobj(protein_pdb.file, f)
 
         allo_path = None
         if allosteric_pose is not None:
@@ -1201,12 +1458,21 @@ async def create_md_job(
             "created_at": created_at,
             "preset": preset,
             "scenario": scenario,
+            "environment": environment,
+            "workflow": workflow,
+            "parent_job_id": parent_job_id,
             "protein_filename": protein_pdb.filename,
-            "orthosteric_filename": orthosteric_ligand.filename
-            if orthosteric_ligand is not None else None,
+            "orthosteric_filename": (
+                orthosteric_ligand.filename
+                if orthosteric_ligand is not None
+                else ("orthosteric_extracted.pdb" if orth_extracted else None)
+            ),
             "allosteric_pose_filename": allosteric_pose.filename
             if allosteric_pose is not None else None,
+            "orthosteric_extracted": orth_extracted,
+            "orthosteric_extract_summary": extract_summary,
         }
+
         _write_json(job_dir / "run.json", run_record)
 
         # Initialize status + log so frontend can read immediately
@@ -1217,6 +1483,9 @@ async def create_md_job(
         params = {
             "preset": preset,
             "scenario": scenario,
+            "environment": environment,
+            "workflow": workflow,
+            "parent_job_id": parent_job_id,
             "files": {
                 "protein_pdb": "protein.pdb",
                 "orthosteric_ligand": orth_path.name if orth_path else None,
@@ -1225,11 +1494,22 @@ async def create_md_job(
         }
         _write_json(input_dir / "params.json", params)
 
-        # Launch container
-        _launch_md_docker(job_dir)
+        try:
+            _launch_md_local(job_dir)
+            _write_json(job_dir / "status.json", {"status": "running"})
+        except Exception:
+            return JSONResponse(
+                status_code=500,
+                content={"error": "Failed to launch local MD job"},
+            )
 
-        # Mark as running
-        _write_json(job_dir / "status.json", {"status": "running"})
+
+        # try:
+        #     _launch_md_docker(job_dir)
+        #     _write_json(job_dir / "status.json", {"status": "running"})
+        # except Exception:
+        #     # _launch_md_docker already wrote error + status
+        #     return JSONResponse(status_code=500, content={"error": "Failed to launch Docker"})
 
         return JSONResponse({"job_id": job_id})
 
@@ -1237,9 +1517,10 @@ async def create_md_job(
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
+from fastapi import Query  # near imports
 
 @app.get("/api/md/jobs")
-def list_md_jobs():
+def list_md_jobs(limit: int = Query(20, ge=0)):
     if not MD_RUNS_DIR.exists():
         return []
 
@@ -1258,6 +1539,9 @@ def list_md_jobs():
             continue
 
     jobs.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+
+    if limit and limit > 0:
+        return jobs[:limit]
     return jobs
 
 
@@ -1273,13 +1557,43 @@ def get_md_job(job_id: str):
     return data
 
 
+from fastapi import Response, Query
+import os
+
 @app.get("/api/md/jobs/{job_id}/log")
-def get_md_job_log(job_id: str):
+def get_md_job_log(
+    job_id: str,
+    offset: int = Query(0, ge=0),
+    chunk_size: int = Query(200_000, ge=1, le=5_000_000),
+):
     job_dir = _md_job_dir(job_id)
     log_path = job_dir / "log.txt"
+
     if not log_path.exists():
-        return JSONResponse(status_code=404, content={"error": "Log not found"})
-    return Response(log_path.read_text(encoding="utf-8"), media_type="text/plain")
+        return Response("", media_type="text/plain", headers={
+            "X-Log-Offset": "0",
+            "X-Log-Size": "0"
+        })
+
+    size = log_path.stat().st_size
+    if offset > size:
+        offset = size
+
+    with open(log_path, "rb") as f:
+        f.seek(offset)
+        data = f.read(chunk_size)
+
+    new_offset = offset + len(data)
+
+    return Response(
+        content=data,
+        media_type="text/plain",
+        headers={
+            "X-Log-Offset": str(new_offset),
+            "X-Log-Size": str(size),
+        }
+    )
+
 
 
 @app.get("/api/md/jobs/{job_id}/files")
@@ -1321,3 +1635,164 @@ def download_md_job(job_id: str):
         media_type="application/zip",
     )
 
+@app.post("/api/md/from_docking")
+async def create_md_job_from_docking(
+    run_id: str = Form(...),
+    pose_idx: int = Form(...),
+    preset: str = Form("cg_popc_50ns"),
+):
+    try:
+        run_dir = RUNS_DIR / run_id
+        rec_pdbqt = run_dir / "receptor.pdbqt"
+        poses_pdbqt = run_dir / "poses.pdbqt"
+
+        if not rec_pdbqt.exists() or not poses_pdbqt.exists():
+            return JSONResponse(
+                status_code=404,
+                content={"error": "Docking run not found or incomplete"},
+            )
+
+        receptor_pdbqt_text = rec_pdbqt.read_text(encoding="utf-8")
+        models = _split_pdbqt_models(poses_pdbqt.read_text(encoding="utf-8"))
+
+        if pose_idx < 0 or pose_idx >= len(models):
+            return JSONResponse(
+                status_code=404,
+                content={"error": "Pose index out of range"},
+            )
+
+        MD_RUNS_DIR.mkdir(parents=True, exist_ok=True)
+
+        job_id = str(uuid.uuid4())
+        job_dir = _md_job_dir(job_id)
+        job_dir.mkdir(exist_ok=False)
+
+        input_dir = job_dir / "input"
+        out_dir = job_dir / "out"
+        _safe_mkdir(input_dir)
+        _safe_mkdir(out_dir)
+
+        # Use the original receptor PDB saved during docking
+        rec_pdb = run_dir / "receptor.pdb"
+        if not rec_pdb.exists():
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Docking run missing receptor.pdb. Re-run docking."},
+            )
+
+        pdb_path = input_dir / "protein.pdb"
+        shutil.copyfile(rec_pdb, pdb_path)
+
+        # Save chosen allosteric pose as PDBQT
+        allo_name = f"allosteric_pose_{pose_idx + 1}.pdbqt"
+        allo_path = input_dir / allo_name
+        allo_path.write_text(models[pose_idx].strip() + "\n", encoding="utf-8")
+
+        # We'll run the "protein + orthosteric + allosteric" scenario,
+        # where orthosteric is expected to be in protein.pdb and can be
+        # extracted by Option A logic in the backend or md-runner.
+        scenario = "protein_plus_orthosteric_plus_allosteric"
+
+        created_at = datetime.now(
+            ZoneInfo("Europe/Paris")
+        ).isoformat(timespec="seconds")
+
+        run_record = {
+            "job_id": job_id,
+            "created_at": created_at,
+            "preset": preset,
+            "scenario": scenario,
+            "source": {
+                "type": "docking_run",
+                "run_id": run_id,
+                "pose_idx": int(pose_idx),
+            },
+            "protein_filename": "protein.pdb",
+            "orthosteric_filename": None,  # Option A: extracted later
+            "allosteric_pose_filename": allo_name,
+        }
+        _write_json(job_dir / "run.json", run_record)
+
+        _write_json(job_dir / "status.json", {"status": "queued"})
+        (job_dir / "log.txt").write_text("", encoding="utf-8")
+
+        params = {
+            "preset": preset,
+            "scenario": scenario,
+            "files": {
+                "protein_pdb": "protein.pdb",
+                "orthosteric_ligand": None,      # Option A
+                "allosteric_pose": allo_name,
+            },
+        }
+        _write_json(input_dir / "params.json", params)
+
+        try:
+            _launch_md_docker(job_dir)
+            _write_json(job_dir / "status.json", {"status": "running"})
+        except Exception:
+            # md-runner launch has already written the error into log.txt
+            return JSONResponse(
+                status_code=500,
+                content={"error": "Failed to launch Docker"}
+            )
+
+        return JSONResponse({"job_id": job_id})
+
+        return JSONResponse({"job_id": job_id})
+
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+from pydantic import BaseModel
+
+class MartiniSetupRequest(BaseModel):
+    workdir: str
+    aa_pdb: str
+    name: str
+    martini_ff: str
+    nt: int = 4
+    do_em: bool = False
+    do_nvt: bool = False
+    do_npt: bool = False
+    do_md: bool = False
+
+
+@app.post("/run-cgmd-setup")
+def run_cgmd_setup(request: MartiniSetupRequest):
+    """
+    Runs the full pipeline: martinize2 → insane → patch top → EM → NVT → NPT → MD.
+    """
+    args = [
+        "--workdir", request.workdir,
+        "--aa_pdb", request.aa_pdb,
+        "--name", request.name,
+        "--martini_ff", request.martini_ff,
+        "--nt", str(request.nt)
+    ]
+
+    if request.do_em:
+        args.append("--do-em")
+    if request.do_nvt:
+        args.append("--do-nvt")
+    if request.do_npt:
+        args.append("--do-npt")
+    if request.do_md:
+        args.append("--do-md")
+
+    run_pipeline(args)
+    return {"status": "ok"}
+
+from fastapi import HTTPException
+
+@app.delete("/api/md/jobs/{job_id}")
+def delete_md_job(job_id: str):
+    job_dir = _md_job_dir(job_id)
+
+    if not job_dir.exists():
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    shutil.rmtree(job_dir)
+
+    return {"status": "deleted", "job_id": job_id}

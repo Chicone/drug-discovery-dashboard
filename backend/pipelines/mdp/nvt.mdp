@@ -1,0 +1,37 @@
+; MARTINI 3 — NVT Equilibration (SAFE GPCR SETTINGS)
+integrator       = md
+dt               = 0.01
+nsteps           = 50000        ; 0.5 ns
+
+; Position restraints ON
+define           = -DPOSRES
+
+; Output control
+nstxout          = 0
+nstvout          = 0
+nstfout          = 0
+nstenergy        = 100
+nstlog           = 100
+
+; Neighbour searching
+cutoff-scheme    = Verlet
+nstlist          = 20
+rlist            = 1.1
+rvdw             = 1.1
+
+; Electrostatics (Martini 3)
+coulomb-type     = reaction-field
+rcoulomb         = 1.1
+epsilon_rf       = 15
+
+; Temperature coupling (correct groups)
+tcoupl           = v-rescale
+tc-grps          = Protein POPC W ION
+tau-t            = 1 1 1 1 
+ref-t            = 310 310 310 310
+
+; Pressure disabled (NVT)
+pcoupl           = no
+
+pbc              = xyz
+constraints      = none

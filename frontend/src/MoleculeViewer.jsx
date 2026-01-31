@@ -585,9 +585,9 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
         ref={viewerRef}
         style={{
           width: "100%",
-          maxWidth: "1000px",
+          maxWidth: "800px",
           minWidth: "500px",
-          height: "800px",
+          height: "600px",
           border: "1px solid #555",
           borderRadius: "6px",
           background: "#111",
@@ -601,7 +601,7 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
       {/* Right: info panel */}
       <Box
         sx={{
-          width: "320px",
+          width: "220px",
           minHeight: "600px",
           border: "1px solid #555",
           borderRadius: "6px",
