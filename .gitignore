@@ -39,3 +39,7 @@ coverage/
 # Docking run history (generated at runtime)
 backend/data/docking_runs/
 
+# MD coarse-grain + equilibration data (runtime generated)
+backend/data/md_runs/
+
+

@@ -1,0 +1,11 @@
+{
+  "ligand_id": "cpd45",
+  "ligand_alias": "NEC",
+  "source_pdb": "2YDV",
+  "box_center": [5.5, 1.4, -4.6],
+  "box_size": [22.0, 22.0, 22.0],
+  "units": "angstrom",
+  "method": "computed_from_co-crystallized_ligand",
+  "padding": 10.0
+}
+

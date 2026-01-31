@@ -1,46 +1,73 @@
-# syntax=docker/dockerfile:1
+# ============================================================
+# BASE: Ubuntu 22.04 with GROMACS compiled for CPU/multithread
+# ============================================================
 FROM ubuntu:22.04
 
-ARG DEBIAN_FRONTEND=noninteractive
-ARG GMX_VERSION=2024.4
+ENV DEBIAN_FRONTEND=noninteractive
 
-# Build deps (CPU build, no GPU)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    wget \
+# ------------------------------------------------------------
+# System dependencies
+# ------------------------------------------------------------
+RUN apt-get update && apt-get install -y \
     build-essential \
     cmake \
-    ninja-build \
-    pkg-config \
     git \
+    wget \
+    curl \
     python3 \
     python3-pip \
+    python3-setuptools \
+    python3-venv \
     libfftw3-dev \
-    libgsl-dev \
+    libx11-dev \
+    libxml2-dev \
+    zlib1g-dev \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /tmp
+# ------------------------------------------------------------
+# Install GROMACS (CPU build)
+# ------------------------------------------------------------
+RUN wget https://ftp.gromacs.org/gromacs/gromacs-2022.2.tar.gz && \
+    tar xfz gromacs-2022.2.tar.gz && \
+    cd gromacs-2022.2 && \
+    mkdir build && cd build && \
+    cmake .. -DGMX_BUILD_OWN_FFTW=ON -DREGRESSIONTEST_DOWNLOAD=OFF -DGMX_DEFAULT_SUFFIX=OFF -DCMAKE_INSTALL_PREFIX=/gromacs && \
+    make -j$(nproc) && make install && \
+    echo "source /gromacs/bin/GMXRC" >> /etc/bash.bashrc && \
+    rm -rf /gromacs-2022.2.tar.gz gromacs-2022.2
 
-# Download + build + install GROMACS
-RUN wget -q "https://ftp.gromacs.org/gromacs/gromacs-${GMX_VERSION}.tar.gz" \
-    && tar -xzf "gromacs-${GMX_VERSION}.tar.gz" \
-    && mkdir -p "gromacs-${GMX_VERSION}/build" \
-    && cd "gromacs-${GMX_VERSION}/build" \
-    && cmake .. \
-        -DGMX_BUILD_OWN_FFTW=OFF \
-        -DGMX_MPI=OFF \
-        -DGMX_OPENMP=ON \
-        -DGMX_GPU=OFF \
-        -DCMAKE_INSTALL_PREFIX=/usr/local \
-        -DCMAKE_BUILD_TYPE=Release \
-        -GNinja \
-    && ninja -j"$(nproc)" \
-    && ninja install \
-    && rm -rf /tmp/*
+ENV PATH="/gromacs/bin:$PATH"
 
-# Make gmx available without "source GMXRC"
-ENV PATH="/usr/local/gromacs/bin:${PATH}"
+# ------------------------------------------------------------
+# Install Martini dependencies
+# ------------------------------------------------------------
+RUN pip3 install "martinize2==2.6" MDAnalysis mdtraj numpy
 
-RUN gmx --version | head -n 1
-CMD ["bash"]
+# ------------------------------------------------------------
+# Install INSANE
+# ------------------------------------------------------------
+RUN wget -O /usr/local/bin/insane https://raw.githubusercontent.com/Tsjerk/Insane/master/insane.py && \
+    chmod +x /usr/local/bin/insane
+
+# ------------------------------------------------------------
+# Install Martini 3 bundle
+# ------------------------------------------------------------
+RUN mkdir -p /opt/martini && \
+    wget -O /opt/martini/martini_v300.zip \
+      https://cgmartini-library.s3.ca-central-1.amazonaws.com/martini_v300.zip && \
+    cd /opt/martini && \
+    unzip martini_v300.zip && \
+    rm martini_v300.zip
+
+# ------------------------------------------------------------
+# Copy your improved run.sh
+# ------------------------------------------------------------
+COPY run.sh /usr/local/bin/run.sh
+RUN chmod +x /usr/local/bin/run.sh
+
+# ------------------------------------------------------------
+# Set entrypoint
+# ------------------------------------------------------------
+ENTRYPOINT ["/usr/local/bin/run.sh"]
 
