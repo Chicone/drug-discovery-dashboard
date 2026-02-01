@@ -19,7 +19,7 @@ Environment:
 Typical usage:
   python build_cg_membrane_md.py \
     --workdir ~/PyCharm/ddd/pdb_membrane \
-    --aa_pdb A2AR_AF_oriented.pdb \
+    --aa_pdb A2AR_AF_OPM.pdb \
     --name Protein \
     --do-em --do-nvt --do-npt --do-md
 """
