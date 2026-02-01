@@ -1,4 +1,4 @@
-# backend/md/pipelines/build_and_equilibrate.py
+# backend/pipelines/build_and_equilibrate.py
 
 import argparse
 from pathlib import Path

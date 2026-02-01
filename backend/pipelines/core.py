@@ -387,17 +387,18 @@ def run_production(job_dir: Path, workdir: Path, params: dict, cfg: dict):
         )
 
     # Choose starting structure for production
-    if (workdir / "npt.gro").exists():
-        start_gro = "npt.gro"
-    elif (workdir / "nvt.gro").exists():
-        start_gro = "nvt.gro"
-    elif (workdir / "em.gro").exists():
-        start_gro = "em.gro"
-    elif (workdir / "system.gro").exists():
-        start_gro = "system.gro"
-    else:
+    start_gro = params.get("start_gro")
+
+    if not start_gro:
+        raise ValueError(
+            "start_gro not provided in params. "
+            "MD runs must explicitly specify a starting structure."
+        )
+
+    start_gro_path = workdir / start_gro
+    if not start_gro_path.exists():
         raise FileNotFoundError(
-            "No starting GRO found (expected one of npt.gro, nvt.gro, em.gro, system.gro)."
+            f"Requested start_gro '{start_gro}' not found in {workdir}"
         )
 
     # Threads (optional)
