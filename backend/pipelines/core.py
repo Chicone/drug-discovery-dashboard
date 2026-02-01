@@ -334,6 +334,8 @@ def run_equilibration(job_dir: Path, workdir: Path, params: dict, cfg: dict):
         ], cwd=workdir)
 
         run_cmd(job_dir, [
+            "caffeinate",
+            "-dimsu",
             "gmx", "mdrun",
             "-ntmpi", ntmpi,
             "-nt", nt,
@@ -403,24 +405,25 @@ def run_production(job_dir: Path, workdir: Path, params: dict, cfg: dict):
     ntmpi = str(gmx_cfg.get("ntmpi", 1))
     nt = str(gmx_cfg.get("nt", 4))
 
-    # Determine length from preset
-    md_ns = cfg.get("md_ns")
-    if md_ns is None:
-        # Default if preset didn't specify
-        md_ns = 50
+   # Start from preset default
+    md_ns = cfg.get("md_ns", 50)
 
-    # dt in ps (Martini often uses 0.02 ps)
-    dt_ps = float(cfg.get("md_dt_ps", 0.02))
+    # Override from params if provided
+    md_ns_param = params.get("md_ns")
+    if md_ns_param is not None:
+        md_ns = float(md_ns_param)
+
+    # Safety
+    if md_ns <= 0:
+        raise ValueError("md_ns must be > 0")
+
+    # Time step (ps)
+    dt_ps = float(cfg.get("md_dt_ps", 0.01))
+
     total_ps = float(md_ns) * 1000.0
     nsteps = int(round(total_ps / dt_ps))
 
     md_mdp = workdir / "md.mdp"
-
-    # Production length from preset
-    md_ns = cfg.get("md_ns", 50)
-    dt_ps = float(cfg.get("md_dt_ps", 0.01))
-    total_ps = float(md_ns) * 1000.0
-    nsteps = int(round(total_ps / dt_ps))
 
     mdp_lines = [
         "; MARTINI 3 — PRODUCTION RUN (GPCR)",

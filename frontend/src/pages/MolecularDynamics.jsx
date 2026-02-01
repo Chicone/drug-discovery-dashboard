@@ -10,6 +10,7 @@ import {
   Divider,
 } from "@mui/material";
 
+
 function MolecularDynamics() {
   const proteinInputRef = useRef(null);
   const orthostericInputRef = useRef(null);
@@ -40,9 +41,13 @@ function MolecularDynamics() {
   const [recentJobs, setRecentJobs] = useState([]);
   const [historyLimit, setHistoryLimit] = useState(20);
   const [loadingJobs, setLoadingJobs] = useState(false);
+  const [selectedJobId, setSelectedJobId] = useState(null);
 
   const [environment, setEnvironment] = useState("membrane");
   const [lastBuildJobId, setLastBuildJobId] = useState(null);
+  const [mdDurationNs, setMdDurationNs] = useState(50);
+  const logEndRef = useRef(null);
+
 
   const presetsAll = useMemo(
     () => [
@@ -87,6 +92,19 @@ function MolecularDynamics() {
     []
   );
 
+  const stopRunJob = async () => {
+    if (!jobId) return;
+
+    try {
+      await fetch(`/api/md/jobs/${jobId}/stop`, {
+        method: "POST",
+      });
+      setStatus("stopped");
+    } catch (err) {
+      setError("Failed to stop MD run");
+    }
+  };
+
   async function loadRecentJobs(limit = historyLimit) {
     setLoadingJobs(true);
     try {
@@ -121,6 +139,21 @@ function MolecularDynamics() {
       setAllostericPoseFile(null);
     }
   }, [scenario]);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("lastBuildJobId");
+    if (saved) {
+      setLastBuildJobId(saved);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (logEndRef.current) {
+      logEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [logText]);
+
+
 
   function openJob(id) {
     if (!id) return;
@@ -174,6 +207,7 @@ async function submitJob({ preset, workflow, parentJobId = null }) {
     form.append("scenario", scenario);
     form.append("environment", environment);
     form.append("workflow", workflow);
+    form.append("md_ns", mdDurationNs);
 
     if (parentJobId) {
       form.append("parent_job_id", parentJobId);
@@ -201,9 +235,11 @@ async function submitJob({ preset, workflow, parentJobId = null }) {
     setStatus("running");
 
     // 🔥 Store build job ID
-    if (workflow === "build_and_equilibrate") {
+    if (workflow === "build_and_equilibrate" || workflow === "build_only") {
       setLastBuildJobId(data.job_id);
+      localStorage.setItem("lastBuildJobId", data.job_id);
     }
+
 
     pollJob(data.job_id);
     loadRecentJobs(historyLimit);
@@ -228,6 +264,12 @@ async function createBuildJob() {
 }
 
 async function createRunJob() {
+  // 🚫 Prevent double runs
+  if (status === "running") {
+    setError("A simulation is already running.");
+    return;
+  }
+
   if (!lastBuildJobId) {
     setError("Please build and equilibrate the system first.");
     return;
@@ -560,6 +602,15 @@ async function createRunJob() {
             {/* Run MD */}
             <Typography variant="subtitle1">Run MD</Typography>
             <TextField
+              label="MD duration (ns)"
+              type="number"
+              value={mdDurationNs}
+              onChange={(e) => setMdDurationNs(Number(e.target.value))}
+              size="small"
+              sx={{ maxWidth: 220 }}
+              inputProps={{ min: 1, step: 10 }}
+            />
+            <TextField
               select
               label="Run preset"
               value={presetRun}
@@ -574,25 +625,35 @@ async function createRunJob() {
               ))}
             </TextField>
 
-            <Stack direction="row" spacing={2}>
-              <Button
-                variant="outlined"
-                onClick={createRunJob}
-                disabled={!canSubmit}
-              >
-                Run MD
-              </Button>
+<Stack direction="row" spacing={2}>
+  <Button
+    variant="outlined"
+    onClick={createRunJob}
+    disabled={!canSubmit || status === "running"}
+  >
+    Run MD
+  </Button>
 
-              {jobId && (
-                <Button
-                  variant="contained"
-                  color="primary"
-                  href={`/api/md/jobs/${jobId}/download`}
-                >
-                  Download results
-                </Button>
-              )}
-            </Stack>
+  <Button
+    variant="outlined"
+    color="error"
+    onClick={stopRunJob}
+    disabled={!jobId || status !== "running"}
+  >
+    Stop MD
+  </Button>
+
+  {jobId && status === "done" && (
+    <Button
+      variant="contained"
+      color="primary"
+      href={`/api/md/jobs/${jobId}/download`}
+    >
+      Download results
+    </Button>
+  )}
+</Stack>
+
 
             {error && (
               <Typography variant="body2" sx={{ color: "#ff8080" }}>
@@ -610,21 +671,25 @@ async function createRunJob() {
               <Typography variant="subtitle2" sx={{ mb: 1 }}>
                 Logs
               </Typography>
-              <Box
-                sx={{
-                  background: "#111",
-                  border: "1px solid #333",
-                  borderRadius: 1,
-                  p: 2,
-                  fontFamily: "monospace",
-                  fontSize: 12,
-                  whiteSpace: "pre-wrap",
-                  maxHeight: 260,
-                  overflowY: "auto",
-                }}
-              >
-                {logText || "No logs yet."}
-              </Box>
+                <Box
+                  sx={{
+                    background: "#111",
+                    border: "1px solid #333",
+                    borderRadius: 1,
+                    p: 2,
+                    fontFamily: "monospace",
+                    fontSize: 12,
+                    whiteSpace: "pre-wrap",
+                    maxHeight: 260,
+                    overflowY: "auto",
+                  }}
+                >
+                  {logText || "No logs yet."}
+
+                  {/* Auto-scroll anchor */}
+                  <div ref={logEndRef} />
+                </Box>
+
 
               <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
                 Output files

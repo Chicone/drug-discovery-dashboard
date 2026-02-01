@@ -1165,7 +1165,13 @@ def _append_log(job_dir: Path, line: str) -> None:
     with open(job_dir / "log.txt", "a", encoding="utf-8") as f:
         f.write(line)
 
-def _run_and_stream(job_dir: Path, cmd: list[str], cwd: Path, env=None) -> int:
+def _run_and_stream(
+    job_dir: Path,
+    cmd: list[str],
+    cwd: Path,
+    env=None,
+) -> int:
+
     _append_log(job_dir, "\n$ " + " ".join(cmd) + "\n")
 
     proc = subprocess.Popen(
@@ -1175,49 +1181,75 @@ def _run_and_stream(job_dir: Path, cmd: list[str], cwd: Path, env=None) -> int:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        bufsize=1,
+        bufsize=1,              #  line buffered
+        universal_newlines=True #
     )
 
+    _write_json(job_dir / "pid.json", {"pid": proc.pid})
+
     assert proc.stdout is not None
-    for line in proc.stdout:
+    for line in iter(proc.stdout.readline, ""):
         _append_log(job_dir, line)
 
     return proc.wait()
+
+
+
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]  # adjust if needed
 # If this file is backend/md/runners/md_local.py then parents[2] -> .../ddd
 
 def _launch_md_local(job_dir: Path) -> None:
+    from pipelines.runtime import RUNNING_JOBS
+
     input_dir = job_dir / "input"
-    params = json.loads((input_dir / "params.json").read_text(encoding="utf-8"))
+    params_path = input_dir / "params.json"
+
+    if not params_path.exists():
+        raise RuntimeError("params.json missing")
+
+    params = json.loads(params_path.read_text(encoding="utf-8"))
 
     workflow = params.get("workflow", "full")
     module = PIPELINE_BY_WORKFLOW.get(workflow)
     if module is None:
-        raise ValueError(f"Unknown workflow: {workflow}")
+        raise RuntimeError(f"Unknown workflow: {workflow}")
+
+    job_id = job_dir.name
+
+    if job_id in RUNNING_JOBS:
+        raise RuntimeError("Job already running")
 
     cmd = [sys.executable, "-m", module, "--job-dir", str(job_dir)]
 
-    out_dir = job_dir / "out"
-    out_dir.mkdir(parents=True, exist_ok=True)
-
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(PROJECT_ROOT) + (
-        (":" + env["PYTHONPATH"]) if env.get("PYTHONPATH") else ""
-    )
+    env["PYTHONPATH"] = str(PROJECT_ROOT)
 
     _write_json(job_dir / "status.json", {"status": "running"})
 
     def worker():
         try:
-            # IMPORTANT: cwd must be project root for -m backend... to work
-            code = _run_and_stream(job_dir, cmd, cwd=PROJECT_ROOT, env=env)
-            _write_json(job_dir / "status.json",
-                        {"status": "done" if code == 0 else "error"})
+            code = _run_and_stream(
+                job_dir,
+                cmd,
+                cwd=PROJECT_ROOT,
+                env=env,
+            )
+
+            _write_json(job_dir / "status.json", {
+                "status": "done" if code == 0 else "error",
+                "exit_code": code,
+            })
+
+            _append_log(job_dir, f"\n[MD] Finished with exit code {code}\n")
+
         except Exception as e:
-            _append_log(job_dir, f"\nERROR: {e}\n")
-            _write_json(job_dir / "status.json", {"status": "error"})
+            _append_log(job_dir, f"\n[MD] EXCEPTION: {e}\n")
+            _write_json(job_dir / "status.json", {
+                "status": "error",
+                "exception": str(e),
+            })
 
     threading.Thread(target=worker, daemon=True).start()
 
@@ -1290,6 +1322,7 @@ async def create_md_job(
     environment: str = Form("membrane"),  # "membrane" | "solvated_box"
     workflow: str = Form("build_only"),  # "build_only" | "equilibrate" | "full"
     parent_job_id: Optional[str] = Form(None),
+    md_ns: Optional[float] = Form(None),
     orthosteric_ligand: Optional[UploadFile] = File(None),
     allosteric_pose: Optional[UploadFile] = File(None),
 ):
@@ -1323,6 +1356,21 @@ async def create_md_job(
                 status_code=400,
                 content={"error": "run_md requires parent_job_id"},
             )
+
+        if md_ns is not None:
+            try:
+                md_ns = float(md_ns)
+            except ValueError:
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": "md_ns must be a number (float, in ns)"},
+                )
+
+            if md_ns <= 0:
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": "md_ns must be > 0"},
+                )
 
         if workflow == "run_md":
             parent_dir = _md_job_dir(parent_job_id)
@@ -1486,6 +1534,7 @@ async def create_md_job(
             "environment": environment,
             "workflow": workflow,
             "parent_job_id": parent_job_id,
+            "md_ns": md_ns,
             "files": {
                 "protein_pdb": "protein.pdb",
                 "orthosteric_ligand": orth_path.name if orth_path else None,
@@ -1796,3 +1845,29 @@ def delete_md_job(job_id: str):
     shutil.rmtree(job_dir)
 
     return {"status": "deleted", "job_id": job_id}
+
+
+import signal
+import os
+
+@app.post("/api/md/jobs/{job_id}/stop")
+def stop_md_job(job_id: str):
+    job_dir = _md_job_dir(job_id)
+    pid_file = job_dir / "pid.json"
+
+    if not pid_file.exists():
+        return JSONResponse(
+            status_code=400,
+            content={"error": "No running process found"},
+        )
+
+    pid = json.loads(pid_file.read_text())["pid"]
+
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+
+    _write_json(job_dir / "status.json", {"status": "stopped"})
+    return {"status": "stopped"}
+
