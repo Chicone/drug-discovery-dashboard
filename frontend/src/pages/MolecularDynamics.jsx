@@ -42,6 +42,7 @@ function MolecularDynamics() {
   const [historyLimit, setHistoryLimit] = useState(20);
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState(null);
+  const [selectedParentJobId, setSelectedParentJobId] = useState(null);
 
   const [environment, setEnvironment] = useState("membrane");
   const [lastBuildJobId, setLastBuildJobId] = useState(null);
@@ -158,6 +159,7 @@ function MolecularDynamics() {
   function openJob(id) {
     if (!id) return;
     setError(null);
+    setSelectedParentJobId(id);
     setJobId(id);
     setStatus("running");
     setLogText("");
@@ -264,21 +266,23 @@ async function createBuildJob() {
 }
 
 async function createRunJob() {
-  // 🚫 Prevent double runs
+  // Prevent double runs
   if (status === "running") {
     setError("A simulation is already running.");
     return;
   }
 
-  if (!lastBuildJobId) {
-    setError("Please build and equilibrate the system first.");
-    return;
+  const parentId = selectedParentJobId || lastBuildJobId;
+
+  if (!parentId) {
+      setError("Please select a job to start MD from.");
+      return;
   }
 
   return submitJob({
     preset: presetRun,
     workflow: "run_md",
-    parentJobId: lastBuildJobId,
+    parentJobId: parentId,
   });
 }
 
@@ -420,7 +424,7 @@ async function createRunJob() {
             ) : (
               <Stack spacing={1}>
                 {recentJobs.map((j) => {
-                      const isActive = j.job_id === jobId;
+                      const isActive = j.job_id === selectedParentJobId;
 
                       return (
                         <Box

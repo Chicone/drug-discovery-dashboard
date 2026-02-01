@@ -1405,32 +1405,48 @@ async def create_md_job(
         _safe_mkdir(out_dir)
 
         # -------------------------------------------------
-        # Inherit built system for production runs
+        # Reuse system from ANY parent job (build / equil / md)
         # -------------------------------------------------
+        start_gro = None
         if workflow == "run_md":
             parent_dir = _md_job_dir(parent_job_id)
             parent_out = parent_dir / "out"
 
-            required_files = [
-                "system.top",
-                "npt.gro",
-            ]
+            # system.top is mandatory
+            top_src = parent_out / "system.top"
+            if not top_src.exists():
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": "Missing system.top in parent job"},
+                )
+            shutil.copy2(top_src, out_dir / "system.top")
 
-            for fname in required_files:
-                src = parent_out / fname
-                dst = out_dir / fname
-
-                if not src.exists():
-                    return JSONResponse(
-                        status_code=400,
-                        content={"error": f"Missing {fname} in parent job"},
-                    )
-
-                shutil.copy2(src, dst)
-
-            # Copy all topology include files (*.itp)
+            # Copy all topology includes
             for itp in parent_out.glob("*.itp"):
                 shutil.copy2(itp, out_dir / itp.name)
+
+            # Find BEST available starting structure (newest logic)
+            candidate_gros = [
+                "npt.gro",  # equilibrated system
+                "md.gro",  # if parent was an MD run
+                "nvt.gro",
+                "em.gro",
+                "system.gro",
+            ]
+
+            for fname in candidate_gros:
+                f = parent_out / fname
+                if f.exists():
+                    start_gro = fname
+                    shutil.copy2(f, out_dir / fname)
+                    break
+
+            if start_gro is None:
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": "No usable .gro found in parent job"},
+                )
+
 
         # --- Save protein ---
         pdb_path = input_dir / "protein.pdb"
@@ -1535,6 +1551,7 @@ async def create_md_job(
             "workflow": workflow,
             "parent_job_id": parent_job_id,
             "md_ns": md_ns,
+            "start_gro": start_gro,
             "files": {
                 "protein_pdb": "protein.pdb",
                 "orthosteric_ligand": orth_path.name if orth_path else None,
