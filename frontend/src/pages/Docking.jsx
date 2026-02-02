@@ -374,6 +374,11 @@ function Docking() {
       ? groupResiduesIntoRanges(poseAnalysis?.residues_seq ?? [])
       : [];
 
+  const selectedMode =
+  selectedPoseIdx != null && poses?.[selectedPoseIdx]
+    ? Number(poses[selectedPoseIdx].mode)
+    : null;
+
 
   return (
     <Paper
@@ -799,52 +804,53 @@ function Docking() {
           </Button>
         ))}
       </Box>
-    </Box>
-  )}
-    {poses.length > 0 && (
-      <Box sx={{ mt: 2 }}>
-        <Typography variant="subtitle1" sx={{ mb: 1 }}>
-          Molecular dynamics
-        </Typography>
+      <Box sx={{ mt: 1 }}>
+            <Button
+              variant="contained"
+              color="secondary"
+              disabled={!selectedRunId || selectedMode == null}
+              onClick={async () => {
+                try {
+                  // 1. Fetch the file from the backend
+                  const res = await fetch(
+                    `/api/docking/runs/${selectedRunId}/complex/${selectedMode}`
+                  );
+                  if (!res.ok) {
+                    alert("Could not download complex PDB");
+                    return;
+                  }
 
-        <Box sx={{ display: "flex", gap: 1, alignItems: "center", flexWrap: "wrap" }}>
-          <TextField
-            select
-            label="MD preset"
-            size="small"
-            value={mdPreset}
-            onChange={(e) => setMdPreset(e.target.value)}
-            sx={{ minWidth: 220 }}
-          >
-            <MenuItem value="cg_popc_50ns">CG Martini: POPC, 50 ns</MenuItem>
-            <MenuItem value="cg_popc_200ns">CG Martini: POPC, 200 ns</MenuItem>
-            <MenuItem value="cg_popc_chol_50ns">CG Martini: POPC+CHOL, 50 ns</MenuItem>
-          </TextField>
+                  // 2. Read the body as blob
+                  const blob = await res.blob();
 
-          <Button
-            variant="contained"
-            color="secondary"
-            onClick={runMdFromDocking}
-            disabled={mdLaunching || !selectedRunId}
-          >
-            {mdLaunching ? "Starting..." : "Run MD for this pose"}
-          </Button>
+                  // 3. Create custom filename (better naming)
+                  const filename = `docking_${selectedRunId}_pose_${String(
+                    selectedMode
+                  ).padStart(2, "0")}_complex.pdb`;
+
+                  // 4. Trigger automatic download WITHOUT save dialog
+                  const url = window.URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = filename;
+                  a.style.display = "none";
+                  document.body.appendChild(a);
+                  a.click();
+                  a.remove();
+                  window.URL.revokeObjectURL(url);
+
+                } catch (err) {
+                  console.error("Auto-download failed:", err);
+                  alert("Could not download file");
+                }
+              }}
+            >
+              Download complex for pose {selectedMode ?? "?"}
+            </Button>
         </Box>
-
-        {mdJobId && (
-          <Typography variant="body2" sx={{ color: "#aaa", mt: 1 }}>
-            MD job started: <strong>{mdJobId}</strong>. Open the Molecular Dynamics tab
-            and click it in “Recent MD jobs”.
-          </Typography>
-        )}
-
-        {mdError && (
-          <Typography variant="body2" sx={{ color: "#ff8080", mt: 1 }}>
-            {mdError}
-          </Typography>
-        )}
       </Box>
-    )}
+
+  )}
 
   {runHistory.length > 0 && (
       <Box sx={{ mt: 3 }}>
@@ -870,28 +876,55 @@ function Docking() {
 
 
         <Stack spacing={0.5}>
-          {runHistory.map((run) => (
-            <Box
-              key={run.run_id}
-              sx={{
-                p: 1,
-                borderRadius: 1,
-                background: "#2a2a2a",
-                fontSize: "0.85rem",
-                cursor: "pointer",
-                "&:hover": { background: "#333" },
-              }}
-              onClick={() => loadRun(run.run_id)}
-            >
+{runHistory.map((run) => (
+  <Box
+    key={run.run_id}
+    sx={{
+      p: 1,
+      borderRadius: 1,
+      background: "#2a2a2a",
+      fontSize: "0.85rem",
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+    }}
+  >
+    {/* Left: clicking loads the run */}
+    <Box
+      sx={{ cursor: "pointer", flex: 1 }}
+      onClick={() => loadRun(run.run_id)}
+    >
+      <strong>{run.ligand}</strong>
+      {typeof run.best_score === "number" && (
+        <> — best {run.best_score.toFixed(2)}</>
+      )}
+      <br />
+      <span style={{ color: "#888" }}>Run ID: {run.run_id}</span>
+      <br />
+      <span style={{ color: "#aaa" }}>{run.created_at}</span>
+    </Box>
 
-              <strong>{run.ligand}</strong>
-              {typeof run.best_score === "number" && (
-                <> — best {run.best_score.toFixed(2)}</>
-              )}
-              <br />
-              <span style={{ color: "#aaa" }}>{run.created_at}</span>
-            </Box>
-          ))}
+    {/* Right: delete button */}
+    <Button
+      size="small"
+      color="error"
+      onClick={async (e) => {
+        e.stopPropagation(); // prevent loading the run
+        try {
+          await fetch(`/api/docking/runs/${run.run_id}`, {
+            method: "DELETE",
+          });
+          loadRunHistory(historyLimit); // refresh list
+        } catch (err) {
+          console.error("Failed to delete run:", err);
+        }
+      }}
+    >
+      ✕
+    </Button>
+  </Box>
+))}
+
         </Stack>
       </Box>
     )}

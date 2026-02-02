@@ -244,6 +244,14 @@ compressibility          = 3e-4 3e-4
 
 pbc                      = xyz
 constraints              = none
+
+
+nstxout                 = 0
+nstvout                 = 0
+nstfout                 = 0
+nstenergy               = 5000
+nstlog                  = 5000
+nstxout-compressed      = 5000   ; save frame every 5000 steps
 """
 
 
@@ -590,7 +598,7 @@ def build_config(args: argparse.Namespace) -> PipelineConfig:
     )
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--workdir", required=True)
     p.add_argument("--aa_pdb", required=True,
@@ -599,7 +607,7 @@ def parse_args() -> argparse.Namespace:
                    help="Protein name used by martinize2/topology")
     p.add_argument("--martini_ff", default=os.environ.get("MARTINI_FF", ""),
                    help="Path to Martini v3 directory (or set MARTINI_FF)")
-    p.add_argument("--nt", type=int, default=4,
+    p.add_argument("--nt", type=int, default=1,
                    help="OpenMP threads for mdrun (-nt)")
     p.add_argument("--do-em", action="store_true")
     p.add_argument("--do-nvt", action="store_true")
@@ -610,11 +618,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--skip-patch-top", action="store_true")
     p.add_argument("--skip-ion-fix", action="store_true")
     p.add_argument("--skip-mdp-write", action="store_true")
-    return p.parse_args()
+    return p.parse_args(argv)
 
 
-def main() -> None:
-    args = parse_args()
+def main(argv=None) -> None:
+    args = parse_args(argv)
     cfg = build_config(args)
 
     ensure_dir(cfg.workdir)

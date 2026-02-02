@@ -388,6 +388,123 @@ def run_production(job_dir: Path, workdir: Path, params: dict, cfg: dict):
 
     # Choose starting structure for production
     start_gro = params.get("start_gro")
+    if not start_gro:
+        raise ValueError(
+            "start_gro not provided in params. "
+            "MD runs must explicitly specify a starting structure."
+        )
+
+    start_gro_path = workdir / start_gro
+    if not start_gro_path.exists():
+        raise FileNotFoundError(
+            f"Requested start_gro '{start_gro}' not found in {workdir}"
+        )
+
+    # Threads (optional)
+    gmx_cfg = params.get("gmx", {})
+    ntmpi = str(gmx_cfg.get("ntmpi", 1))
+    nt = str(gmx_cfg.get("nt", 1))
+
+    # -------------------------------
+    # MD duration logic (UNCHANGED)
+    # -------------------------------
+
+    # Start from preset default
+    md_ns = cfg.get("md_ns", 50)
+
+    # Override from params if provided
+    md_ns_param = params.get("md_ns")
+    if md_ns_param is not None:
+        md_ns = float(md_ns_param)
+
+    # Safety
+    if md_ns <= 0:
+        raise ValueError("md_ns must be > 0")
+
+
+    # -------------------------------
+    # md.mdp handling (NEW PART)
+    # -------------------------------
+
+    template_mdp = MDP_DIR / "md.mdp"
+    if not template_mdp.exists():
+        raise FileNotFoundError(f"Missing MD mdp template: {template_mdp}")
+
+    md_mdp = workdir / "md.mdp"
+
+    # Copy template into job directory
+    md_mdp.write_text(template_mdp.read_text(), encoding="utf-8")
+
+    # Read dt from md.mdp template (single source of truth)
+    dt_ps = None
+    for line in template_mdp.read_text().splitlines():
+        if line.strip().startswith("dt"):
+            dt_ps = float(line.split("=")[1])
+            break
+
+    if dt_ps is None:
+        raise RuntimeError("md.mdp template does not define dt")
+
+    total_ps = md_ns * 1000.0
+    nsteps = int(round(total_ps / dt_ps))
+
+
+    # Patch nsteps exactly like before
+    lines = md_mdp.read_text().splitlines()
+    new_lines = []
+    replaced = False
+
+    for line in lines:
+        if line.strip().startswith("nsteps"):
+            new_lines.append(f"nsteps              = {nsteps}")
+            replaced = True
+        else:
+            new_lines.append(line)
+
+    if not replaced:
+        raise RuntimeError("md.mdp template does not define nsteps")
+
+    md_mdp.write_text("\n".join(new_lines), encoding="utf-8")
+
+    # -------------------------------
+    # Build TPR
+    # -------------------------------
+
+    run_cmd(job_dir, [
+        "gmx", "grompp",
+        "-f", "md.mdp",
+        "-c", start_gro,
+        "-p", "system.top",
+        "-o", "md.tpr",
+        "-maxwarn", "1",
+    ], cwd=workdir)
+
+    # -------------------------------
+    # Run production
+    # -------------------------------
+
+    run_cmd(job_dir, [
+        "gmx", "mdrun",
+        "-ntmpi", ntmpi,
+        "-nt", nt,
+        "-v",
+        "-deffnm", "md",
+    ], cwd=workdir)
+
+
+def run_production_temp(job_dir: Path, workdir: Path, params: dict, cfg: dict):
+    steps = cfg["steps"]
+    if "md" not in steps:
+        return
+
+    system_top = workdir / "system.top"
+    if not system_top.exists():
+        raise FileNotFoundError(
+            f"Missing {system_top}. Preset must include build + patch_top."
+        )
+
+    # Choose starting structure for production
+    start_gro = params.get("start_gro")
 
     if not start_gro:
         raise ValueError(
@@ -441,9 +558,9 @@ def run_production(job_dir: Path, workdir: Path, params: dict, cfg: dict):
         "nstxout             = 0",
         "nstvout             = 0",
         "nstfout             = 0",
-        "nstenergy           = 1000",
-        "nstlog              = 1000",
-        "nstxout-compressed  = 2000",
+        "nstenergy           = 100",
+        "nstlog              = 100",
+        "nstxout-compressed  = 100",
         "",
         "; Neighbour searching",
         "cutoff-scheme       = Verlet",
