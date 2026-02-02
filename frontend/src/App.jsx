@@ -140,10 +140,10 @@ export default function App() {
           >
             <Tab label="Molecular Design" />
             <Tab label="Docking" />
-            <Tab label="Molecular Dynamics" />
             <Tab label="ADMET" />
             <Tab label="Library" />
             <Tab label="Reports" />
+            <Tab label="Molecular Dynamics" />
           </Tabs>
         </Toolbar>
       </AppBar>

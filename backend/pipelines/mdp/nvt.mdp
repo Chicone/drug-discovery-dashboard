@@ -1,7 +1,7 @@
 ; MARTINI 3 — NVT Equilibration (SAFE GPCR SETTINGS)
 integrator       = md
 dt               = 0.01
-nsteps           = 50000        ; 0.5 ns
+nsteps           = 200000        ; 2 ns
 
 ; Position restraints ON
 define           = -DPOSRES
@@ -35,3 +35,7 @@ pcoupl           = no
 
 pbc              = xyz
 constraints      = none
+
+gen_vel = yes           ; only in NVT (or MD if skipping NVT)
+gen_temp = 310
+gen_seed = -1           ; -1 means random seed each run

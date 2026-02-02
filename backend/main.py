@@ -835,6 +835,17 @@ async def dock_vina(
         receptor_pdb_out = run_dir / "receptor.pdb"
         shutil.copyfile(rec_pdb, receptor_pdb_out)
 
+
+        # Save complex PDBs per pose (protein + ligand)
+        poses_dir = run_dir / "poses_pdb"
+        poses_dir.mkdir(exist_ok=True)
+
+        for p in poses:
+            mode = int(p["mode"])  # 1-based
+            complex_path = poses_dir / f"pose_{mode:02d}_complex.pdb"
+            complex_path.write_text(p["pdb"].strip() + "\n", encoding="utf-8")
+
+
         scores = [p.get("score") for p in poses]
 
         if best_score is None:
@@ -1029,6 +1040,65 @@ def analyze_run_pose(run_id: str, pose_idx: int, cutoff: float = 4.0):
     )
     return out
 
+@app.get("/api/docking/runs/{run_id}/complex/{mode}")
+def download_complex_pdb(run_id: str, mode: int):
+    run_dir = RUNS_DIR / run_id
+    complex_path = run_dir / "poses_pdb" / f"pose_{mode:02d}_complex.pdb"
+    if not complex_path.exists():
+        return JSONResponse(status_code=404,
+                            content={"error": "complex PDB not found"})
+
+    return FileResponse(
+        path=str(complex_path),
+        filename=f"{run_id}_pose_{mode:02d}_complex.pdb",
+        media_type="chemical/x-pdb",
+    )
+
+@app.post("/api/docking/runs/{run_id}/save/{mode}")
+def save_pose_for_experiment(run_id: str, mode: int):
+    run_dir = RUNS_DIR / run_id
+    poses_dir = run_dir / "poses_pdb"
+    saved_dir = run_dir / "saved_complexes"
+    saved_dir.mkdir(exist_ok=True)
+
+    src = poses_dir / f"pose_{mode:02d}_complex.pdb"
+    if not src.exists():
+        return JSONResponse(status_code=404,
+                            content={"error": "Pose not found"})
+
+    # Load config to extract ligand/receptor for naming
+    cfg_path = run_dir / "config.json"
+    if cfg_path.exists():
+        cfg = json.loads(cfg_path.read_text())
+        receptor = cfg.get("receptor_id", cfg.get("protein_name", "RECEPTOR"))
+        ligand = cfg.get("ligand_id", cfg.get("ligand_name", "LIGAND"))
+    else:
+        receptor = "RECEPTOR"
+        ligand = "LIGAND"
+
+    dst = saved_dir / f"{receptor}_{ligand}_pose_{mode:02d}_complex.pdb"
+    shutil.copyfile(src, dst)
+
+    return {"status": "ok", "saved_as": dst.name}
+
+@app.delete("/api/docking/runs/{run_id}")
+def delete_docking_run(run_id: str):
+    run_dir = RUNS_DIR / run_id
+
+    if not run_dir.exists():
+        return JSONResponse(
+            status_code=404,
+            content={"error": "Run not found"}
+        )
+
+    try:
+        shutil.rmtree(run_dir)
+        return {"status": "deleted", "run_id": run_id}
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Failed to delete run: {str(e)}"}
+        )
 
 
 from fastapi import UploadFile, File
@@ -1552,6 +1622,10 @@ async def create_md_job(
             "parent_job_id": parent_job_id,
             "md_ns": md_ns,
             "start_gro": start_gro,
+            "gmx": {
+                "nt": 1,
+                "ntmpi": 1
+            },
             "files": {
                 "protein_pdb": "protein.pdb",
                 "orthosteric_ligand": orth_path.name if orth_path else None,
@@ -1630,23 +1704,34 @@ import os
 def get_md_job_log(
     job_id: str,
     offset: int = Query(0, ge=0),
-    chunk_size: int = Query(200_000, ge=1, le=5_000_000),
+    chunk_size: int = Query(200_000, ge=1, le=1_000_000),
 ):
+    MAX_LOG_BYTES = 2_000_000  # 2 MB rolling window
+
     job_dir = _md_job_dir(job_id)
     log_path = job_dir / "log.txt"
 
     if not log_path.exists():
-        return Response("", media_type="text/plain", headers={
-            "X-Log-Offset": "0",
-            "X-Log-Size": "0"
-        })
+        return Response(
+            "",
+            media_type="text/plain",
+            headers={
+                "X-Log-Offset": "0",
+                "X-Log-Size": "0",
+            },
+        )
 
-    size = log_path.stat().st_size
-    if offset > size:
-        offset = size
+    file_size = log_path.stat().st_size
+
+    # Define rolling window start
+    window_start = max(0, file_size - MAX_LOG_BYTES)
+    window_size = file_size - window_start
+
+    # Clamp offset to window
+    offset = min(offset, window_size)
 
     with open(log_path, "rb") as f:
-        f.seek(offset)
+        f.seek(window_start + offset)
         data = f.read(chunk_size)
 
     new_offset = offset + len(data)
@@ -1656,8 +1741,8 @@ def get_md_job_log(
         media_type="text/plain",
         headers={
             "X-Log-Offset": str(new_offset),
-            "X-Log-Size": str(size),
-        }
+            "X-Log-Size": str(window_size),
+        },
     )
 
 
@@ -1818,7 +1903,7 @@ class MartiniSetupRequest(BaseModel):
     aa_pdb: str
     name: str
     martini_ff: str
-    nt: int = 4
+    nt: int = 1
     do_em: bool = False
     do_nvt: bool = False
     do_npt: bool = False
@@ -1830,6 +1915,8 @@ def run_cgmd_setup(request: MartiniSetupRequest):
     """
     Runs the full pipeline: martinize2 → insane → patch top → EM → NVT → NPT → MD.
     """
+    print("REQUEST BODY:", request.model_dump())
+
     args = [
         "--workdir", request.workdir,
         "--aa_pdb", request.aa_pdb,
