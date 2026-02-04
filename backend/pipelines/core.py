@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 
 from pathlib import Path
-MDP_DIR = Path(__file__).resolve().parent / "mdp"
+MDP_DIR = Path(__file__).resolve().parent / "mdp_templates"
 
 # -------------------------------------------------------
 # Utilities

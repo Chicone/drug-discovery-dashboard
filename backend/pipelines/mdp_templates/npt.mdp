@@ -26,9 +26,9 @@ epsilon_rf          = 15
 
 ; Temperature coupling
 tcoupl              = v-rescale
-tc-grps             = Protein POPC W ION
-tau-t               = 1 1 1 1
-ref-t               = 310 310 310 310
+tc-grps             = Protein ORT POPC W ION
+tau-t               = 1.0 1.0 1.0 1.0 1.0
+ref-t               = 310 310 310 310 310
 
 ; Pressure coupling (semi-isotropic)
 pcoupl              = berendsen
