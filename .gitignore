@@ -42,4 +42,6 @@ backend/data/docking_runs/
 # MD coarse-grain + equilibration data (runtime generated)
 backend/data/md_runs/
 
+AutoMartini_M3/
+
 

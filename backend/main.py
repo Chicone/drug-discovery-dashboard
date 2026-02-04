@@ -15,11 +15,20 @@ from pipelines.pipeline import main as run_pipeline
 import numpy as np
 from fastapi.responses import JSONResponse
 
+print(">>> RUNTIME: runtime.py LOADED", __file__)
+
+
+# PIPELINE_BY_WORKFLOW = {
+#     "build_only": "backend.pipelines.build_system",
+#     "build_and_equilibrate": "backend.pipelines.build_and_equilibrate",
+#     "run_md": "backend.pipelines.production",
+# }
 PIPELINE_BY_WORKFLOW = {
-    "build_only": "backend.pipelines.build_system",
-    "build_and_equilibrate": "backend.pipelines.build_and_equilibrate",
-    "run_md": "backend.pipelines.production",
+    "build_only": "backend.pipelines.pipeline",
+    "build_and_equilibrate": "backend.pipelines.pipeline",
+    "run_md": "backend.pipelines.pipeline",
 }
+
 
 PDBe_UNIPROT_MAPPING_URL = (
     "https://www.ebi.ac.uk/pdbe/api/mappings/uniprot/{pdb_id}"
@@ -1273,6 +1282,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]  # adjust if needed
 def _launch_md_local(job_dir: Path) -> None:
     from pipelines.runtime import RUNNING_JOBS
 
+    print(">>> RUNTIME: _launch_md_local() CALLED")
+
     input_dir = job_dir / "input"
     params_path = input_dir / "params.json"
 
@@ -1291,7 +1302,35 @@ def _launch_md_local(job_dir: Path) -> None:
     if job_id in RUNNING_JOBS:
         raise RuntimeError("Job already running")
 
-    cmd = [sys.executable, "-m", module, "--job-dir", str(job_dir)]
+    input_dir = job_dir / "input"
+    cmd = [
+        sys.executable,
+        "-m", module,
+        "--workdir", str(job_dir / "out"),
+        "--aa_pdb", str(input_dir / params["files"]["protein_pdb"]),
+    ]
+    orth = params["files"].get("orthosteric_ligand")
+    if orth:
+        cmd += ["--orthosteric_pdb", str(input_dir / orth)]
+    # cmd = [sys.executable, "-m", module, "--job-dir", str(job_dir)]
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(PROJECT_ROOT)
+    env["MARTINI_FF"] = "/Users/luiscamara/miniforge3/envs/drugdash/martini_v300"
+
+    if "MARTINI_FF" in env:
+        cmd += ["--martini_ff", env["MARTINI_FF"]]
+
+    preset = params.get("preset", "")
+
+    if preset.endswith("_build"):
+        pass
+    elif preset.endswith("_em"):
+        cmd.append("--do-em")
+    elif preset.endswith("_eq"):
+        cmd.extend(["--do-em", "--do-nvt", "--do-npt"])
+    elif preset.endswith("_prod") or workflow == "run_md":
+        cmd.append("--do-md")
 
     env = os.environ.copy()
     env["PYTHONPATH"] = str(PROJECT_ROOT)
@@ -1924,6 +1963,9 @@ def run_cgmd_setup(request: MartiniSetupRequest):
         "--martini_ff", request.martini_ff,
         "--nt", str(request.nt)
     ]
+    # Pass orthosteric ligand PDB if provided
+    if request.orthosteric_pdb is not None:
+        args += ["--orthosteric_pdb", request.orthosteric_pdb]
 
     if request.do_em:
         args.append("--do-em")

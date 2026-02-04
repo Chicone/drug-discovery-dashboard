@@ -87,7 +87,7 @@ function MolecularDynamics() {
       { id: "protein_plus_orthosteric", label: "Protein + orthosteric ligand" },
       {
         id: "protein_plus_orthosteric_plus_allosteric",
-        label: "Protein + orthosteric + allosteric (pose)",
+        label: "Protein + orthosteric + allosteric ligand",
       },
     ],
     []
@@ -189,6 +189,14 @@ async function submitJob({ preset, workflow, parentJobId = null }) {
     !allostericPoseFile
   ) {
     setError("Scenario requires an allosteric pose file.");
+    return;
+  }
+
+  if (
+    scenario !== "protein_only" &&
+    !orthostericFile
+  ) {
+    setError("Scenario requires an orthosteric ligand from a docked complex.");
     return;
   }
 
@@ -530,7 +538,7 @@ async function createRunJob() {
               <Typography variant="body2" sx={{ color: "#aaa" }}>
                 {orthostericFile
                   ? orthostericFile.name
-                  : "Optional. Backend may extract it from receptor PDB."}
+                  : "From a docked complex to extract orthosteric pose"}
               </Typography>
             </Stack>
 
@@ -542,7 +550,7 @@ async function createRunJob() {
                 onClick={() => allostericInputRef.current?.click()}
                 disabled={scenario !== "protein_plus_orthosteric_plus_allosteric"}
               >
-                Select allosteric pose
+                Select allosteric ligand
               </Button>
               <input
                 ref={allostericInputRef}
@@ -554,7 +562,7 @@ async function createRunJob() {
               <Typography variant="body2" sx={{ color: "#aaa" }}>
                 {allostericPoseFile
                   ? allostericPoseFile.name
-                  : "Optional (depends on scenario)"}
+                  : "From a docked complex to extract allosteric pose"}
               </Typography>
             </Stack>
 
