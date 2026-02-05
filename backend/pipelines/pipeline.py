@@ -178,6 +178,36 @@ def extract_ligand(
 
     dst_pdb.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
+def patch_small_beads(itp_path: Path):
+    """
+    Shrink the only bead in the ligand that can be made smaller:
+    SC5 (Small apolar bead) -> TC5 (Tiny apolar bead).
+
+    All other beads in the ligand (TN5a, TN4, TN3, TN5d, TC3, TC5)
+    are ALREADY Tiny beads in Martini 3 and must not be modified.
+    """
+    if not itp_path.exists():
+        raise FileNotFoundError(f"Cannot patch missing ITP: {itp_path}")
+
+    # Only valid shrinkable mapping for your ligand:
+    replacements = {
+        " SC5 ": " TC5 ",
+    }
+
+    text = itp_path.read_text()
+
+    changed = 0
+    for old, new in replacements.items():
+        n = text.count(old)
+        if n:
+            text = text.replace(old, new)
+            changed += n
+
+    itp_path.write_text(text)
+    print(f"[patch] Applied {changed} SC5→TC5 replacements to {itp_path}")
+
+
+
 
 # ------------------------------ Steps --------------------------------
 
@@ -197,7 +227,8 @@ def step_martinize(cfg: PipelineConfig) -> PipelineConfig:
         "-x", cg_name,
         "-o", top_name,
         "-ff", "martini3001",
-        "-ss", "C",
+        "-ss", "H",
+        # "-ss", "C",
         "-name", cfg.protein_name,
         "-p", "backbone",
         "-pf", "1000",
@@ -247,7 +278,7 @@ def step_insane(cfg: PipelineConfig) -> None:
         "-dm",
         "0",
         "-box",
-        "15.0,15.0,15.0",
+        "15.0,15.0,17.0",
     ]
     run(cmd, cwd=cfg.workdir)
 
@@ -891,6 +922,9 @@ def main(argv=None) -> None:
             cg_pdb_out=orth_cg,
             itp_out=orth_itp,
         )
+
+        # 2b) Patch ligand ITP bead sizes (Regular -> Small)
+        patch_small_beads(orth_itp)
 
         # 3) Merge PROTEIN + LIGAND into cg_complex.pdb
         cg_complex = cfg.workdir / "cg_complex.pdb"

@@ -6,14 +6,14 @@
 define                  =
 
 integrator              = md
-dt                      = 0.005      ; ultra-safe: 5 fs
+dt                      = 0.001      ; ultra-safe: 2 fs
 nsteps                  = 200000     ; 1 ns (adjust as needed)
 
 ; ----- Temperature control -----
 tcoupl                  = v-rescale
-tc-grps                 = System
-tau-t                   = 2.0
-ref-t                   = 310
+tc-grps                 = Protein ORT POPC W ION
+tau-t                   = 1.0 1.0 1.0 1.0 1.0
+ref-t                   = 310 310 310 310 310
 
 ; ----- Pressure control ------
 pcoupl                  = no        ; NVT only

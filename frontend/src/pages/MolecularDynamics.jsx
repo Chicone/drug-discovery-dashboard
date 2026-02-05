@@ -49,6 +49,18 @@ function MolecularDynamics() {
   const [mdDurationNs, setMdDurationNs] = useState(50);
   const logEndRef = useRef(null);
 
+  const [showFiles, setShowFiles] = useState(false);
+
+  // Persistent job locking
+  const [lockedJobs, setLockedJobs] = useState(() => {
+    try {
+      const raw = localStorage.getItem("lockedJobs");
+      if (raw) return new Set(JSON.parse(raw));
+    } catch (e) {
+      console.error("Failed to load locked jobs:", e);
+    }
+    return new Set();
+  });
 
   const presetsAll = useMemo(
     () => [
@@ -128,7 +140,7 @@ function MolecularDynamics() {
   }, [historyLimit]);
 
   useEffect(() => {
-    const t = setInterval(() => loadRecentJobs(historyLimit), 5000);
+    const t = setInterval(() => loadRecentJobs(historyLimit), 2000);
     return () => clearInterval(t);
   }, [historyLimit]);
 
@@ -154,6 +166,13 @@ function MolecularDynamics() {
     }
   }, [logText]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem("lockedJobs", JSON.stringify([...lockedJobs]));
+    } catch (e) {
+      console.error("Failed to save locked jobs:", e);
+    }
+  }, [lockedJobs]);
 
 
   function openJob(id) {
@@ -458,18 +477,51 @@ async function createRunJob() {
                             </Typography>
                           </Box>
 
-                          {/* Right: delete button */}
-                          <Button
-                            size="small"
-                            color="error"
-                            onClick={async (e) => {
-                              e.stopPropagation(); // VERY IMPORTANT
-                              await fetch(`/api/md/jobs/${j.job_id}`, { method: "DELETE" });
-                              loadRecentJobs(historyLimit);
-                            }}
-                          >
-                            ✕
-                          </Button>
+{/* Right section: lock + delete */}
+<Stack direction="row" spacing={1} alignItems="center">
+  {/* Lock toggle button */}
+  <Button
+    size="small"
+    variant="outlined"
+    sx={{
+      minWidth: 32,
+      padding: "2px 6px",
+      color: lockedJobs.has(j.job_id) ? "#66bb6a" : "#aaa",
+      borderColor: lockedJobs.has(j.job_id) ? "#66bb6a" : "#555",
+      "&:hover": {
+        borderColor: lockedJobs.has(j.job_id) ? "#81c784" : "#888",
+      },
+    }}
+    onClick={(e) => {
+      e.stopPropagation();
+      setLockedJobs(prev => {
+        const next = new Set(prev);
+        if (next.has(j.job_id)) next.delete(j.job_id);
+        else next.add(j.job_id);
+        return next;
+      });
+    }}
+
+  >
+    {lockedJobs.has(j.job_id) ? "🔒" : "🔓"}
+  </Button>
+
+  {/* Delete button (disabled if locked) */}
+  <Button
+    size="small"
+    color="error"
+    disabled={lockedJobs.has(j.job_id) === true}
+    onClick={async (e) => {
+      e.stopPropagation();
+      if (lockedJobs.has(j.job_id)) return; // extra safety
+      await fetch(`/api/md/jobs/${j.job_id}`, { method: "DELETE" });
+      loadRecentJobs(historyLimit);
+    }}
+  >
+    ✕
+  </Button>
+</Stack>
+
                         </Box>
                       );
                     })}
@@ -703,22 +755,60 @@ async function createRunJob() {
                 </Box>
 
 
-              <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
-                Output files
-              </Typography>
-              <Box sx={{ color: "#aaa", fontSize: 13 }}>
-                {files.length === 0 ? (
-                  <div>No output files yet.</div>
-                ) : (
-                  <ul>
-                    {files.map((f) => (
-                      <li key={f.name}>
-                        {f.name} {f.size ? `(${f.size})` : ""}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </Box>
+{/* Collapsible Output Files */}
+<Box sx={{ mt: 2 }}>
+  <Box
+    onClick={() => setShowFiles((v) => !v)}
+    sx={{
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      cursor: "pointer",
+      userSelect: "none",
+      background: "#111",
+      border: "1px solid #333",
+      borderRadius: 1,
+      px: 2,
+      py: 1,
+    }}
+  >
+    <Typography variant="subtitle2">
+      Output files
+    </Typography>
+    <Typography sx={{ fontSize: 18 }}>
+      {showFiles ? "▾" : "▸"}
+    </Typography>
+  </Box>
+
+  {showFiles && (
+    <Box
+      sx={{
+        mt: 1,
+        color: "#aaa",
+        fontSize: 13,
+        background: "#111",
+        border: "1px solid #333",
+        borderRadius: 1,
+        p: 2,
+        maxHeight: 250,
+        overflowY: "auto",
+      }}
+    >
+      {files.length === 0 ? (
+        <div>No output files yet.</div>
+      ) : (
+        <ul style={{ margin: 0, paddingLeft: "20px" }}>
+          {files.map((f) => (
+            <li key={f.name}>
+              {f.name} {f.size ? `(${f.size})` : ""}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Box>
+  )}
+</Box>
+
             </Box>
           </Stack>
         </Box>

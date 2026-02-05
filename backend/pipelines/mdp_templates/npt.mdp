@@ -1,6 +1,6 @@
 ; MARTINI 3 — NPT Equilibration (GPCR-SAFE)
 integrator          = md
-dt                  = 0.01
+dt                  = 0.001
 nsteps              = 2000000      ; 20 ns (good for membrane relaxation)
 
 ; Position restraints remain ON
