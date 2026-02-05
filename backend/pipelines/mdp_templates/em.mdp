@@ -1,8 +1,8 @@
 ; MARTINI 3 — Energy Minimization
 integrator      = steep
-emtol           = 100.0
-emstep          = 0.005
-nsteps          = 100000
+emtol           = 50.0
+emstep          = 0.01
+nsteps          = 50000
 
 ; Neighbour searching
 cutoff-scheme   = Verlet
@@ -21,6 +21,5 @@ rvdw            = 1.1
 ; Martini specifics
 pbc             = xyz
 constraints     = none
-econstraintalgorithm = steep
 
 

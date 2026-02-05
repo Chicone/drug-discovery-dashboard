@@ -1244,6 +1244,7 @@ def _append_log(job_dir: Path, line: str) -> None:
     with open(job_dir / "log.txt", "a", encoding="utf-8") as f:
         f.write(line)
 
+
 def _run_and_stream(
     job_dir: Path,
     cmd: list[str],
@@ -1260,17 +1261,65 @@ def _run_and_stream(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        bufsize=1,              #  line buffered
-        universal_newlines=True #
+        bufsize=1,
+        universal_newlines=True,
+        preexec_fn=os.setsid,  # <--- NEW
     )
 
     _write_json(job_dir / "pid.json", {"pid": proc.pid})
 
     assert proc.stdout is not None
     for line in iter(proc.stdout.readline, ""):
+
+        # --- NEW: detect catastrophic LINCS / constraint failures ---
+        if (
+            "LINCS WARNING" in line
+            or "constraint error" in line.lower()
+            or "bond length" in line.lower()
+            or "constraint" in line.lower() and "violated" in line.lower()
+        ):
+            _append_log(job_dir, "\n### ERROR: Constraint failure detected. Stopping MD early.\n")
+            # Kill the entire GROMACS process group
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+            return 1
+        # ------------------------------------------------------------
+
         _append_log(job_dir, line)
 
     return proc.wait()
+
+
+# def _run_and_stream(
+#     job_dir: Path,
+#     cmd: list[str],
+#     cwd: Path,
+#     env=None,
+# ) -> int:
+#
+#     _append_log(job_dir, "\n$ " + " ".join(cmd) + "\n")
+#
+#     proc = subprocess.Popen(
+#         cmd,
+#         cwd=str(cwd),
+#         env=env,
+#         stdout=subprocess.PIPE,
+#         stderr=subprocess.STDOUT,
+#         text=True,
+#         bufsize=1,              #  line buffered
+#         universal_newlines=True #
+#     )
+#
+#     _write_json(job_dir / "pid.json", {"pid": proc.pid})
+#
+#     assert proc.stdout is not None
+#     for line in iter(proc.stdout.readline, ""):
+#         _append_log(job_dir, line)
+#
+#     return proc.wait()
 
 
 
