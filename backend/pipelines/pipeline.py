@@ -459,30 +459,52 @@ def step_fix_ions(cfg: PipelineConfig) -> None:
     must_exist(cfg.system_gro, "system.gro for ion fix")
     patch_gro_ions(cfg.system_gro)
 
-def step_write_mdps(cfg: PipelineConfig) -> None:
+def step_write_mdps(cfg: PipelineConfig, md_ns_override: Optional[float] = None) -> None:
     print("\n=== 4) WRITE MDP FILES ===")
 
-    # this points to backend/pipelines/mdp/
     template_dir = MDP_DIR
 
-    # helper to copy a template to the output location
     def cp(name, out_path):
         src = template_dir / name
         if not src.exists():
             raise FileNotFoundError(f"Missing MDP template: {src}")
         write_text(out_path, src.read_text())
 
+    # Copy default templates
     cp("em.mdp",  cfg.em_mdp)
     cp("nvt.mdp", cfg.nvt_mdp)
     cp("npt.mdp", cfg.npt_mdp)
     cp("md.mdp",  cfg.md_mdp)
 
-# def step_write_mdps(cfg: PipelineConfig) -> None:
-#     print("\n=== 4) WRITE MDP FILES ===")
-#     write_text(cfg.em_mdp, EM_MDP)
-#     write_text(cfg.nvt_mdp, NVT_MDP)
-#     write_text(cfg.npt_mdp, NPT_MDP)
-#     write_text(cfg.md_mdp, MD_MDP)
+    # -------------------------------------------------
+    # Apply MD duration override (md_ns)
+    # -------------------------------------------------
+    if md_ns_override is not None:
+        md_text = cfg.md_mdp.read_text()
+
+        # convert ns → nsteps
+        # dt is read from mdp
+        dt = None
+        for line in md_text.splitlines():
+            if line.strip().startswith("dt"):
+                dt = float(line.split("=")[1])
+                break
+
+        if dt is None:
+            raise RuntimeError("md.mdp missing 'dt' parameter")
+
+        nsteps = int((md_ns_override * 1000) / dt)
+
+        md_text = re.sub(
+            r"^nsteps\s*=\s*\d+",
+            f"nsteps = {nsteps}",
+            md_text,
+            flags=re.MULTILINE
+        )
+
+        cfg.md_mdp.write_text(md_text)
+        print(f"[patch] Applied md_ns override → nsteps = {nsteps}")
+
 
 
 def step_grompp_mdrun_em(cfg: PipelineConfig, nt: int) -> None:
@@ -1019,8 +1041,14 @@ def main(argv=None) -> None:
     if args.do_md:
         print("MD-only mode detected -> skipping ALL build steps.")
 
-        # Directly run MD continuation
-        step_write_mdps(cfg)  # generates md.mdp
+        # Load MD override from params.json
+        params_file = cfg.workdir.parent / "input" / "params.json"
+        md_ns = None
+        if params_file.exists():
+            params = json.loads(params_file.read_text())
+            md_ns = params.get("md_ns")
+
+        step_write_mdps(cfg, md_ns_override=md_ns)
         step_grompp_mdrun_md(cfg, nt=args.nt)
         return
 
@@ -1142,7 +1170,14 @@ def main(argv=None) -> None:
         step_fix_ions(cfg)
 
     if not args.skip_mdp_write:
-        step_write_mdps(cfg)
+        # Load MD duration override
+        params_file = cfg.workdir / "input" / "params.json"
+        md_ns = None
+        if params_file.exists():
+            params = json.loads(params_file.read_text())
+            md_ns = params.get("md_ns")
+
+        step_write_mdps(cfg, md_ns_override=md_ns)
 
     # Create pdb of the full system
     run([
