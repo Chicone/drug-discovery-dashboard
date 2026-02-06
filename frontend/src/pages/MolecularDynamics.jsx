@@ -70,12 +70,7 @@ function MolecularDynamics() {
       },
       { id: "m3_popc_em", label: "Martini 3: POPC + EM" },
       { id: "m3_popc_eq", label: "Martini 3: POPC + EM + NVT + NPT" },
-      { id: "m3_popc_prod_50ns", label: "Martini 3: POPC production 50 ns" },
-      { id: "m3_popc_prod_200ns", label: "Martini 3: POPC production 200 ns" },
-      {
-        id: "m3_popc_chol_prod_200ns",
-        label: "Martini 3: POPC+CHOL production 200 ns",
-      },
+      { id: "m3_popc_prod", label: "Martini 3: POPC production" },
     ],
     []
   );
@@ -89,7 +84,7 @@ function MolecularDynamics() {
   );
 
   const runPresets = useMemo(
-    () => presetsAll.filter((p) => p.id.includes("_prod_")),
+    () => presetsAll.filter((p) => p.id.includes("m3_popc_prod")),
     [presetsAll]
   );
 
