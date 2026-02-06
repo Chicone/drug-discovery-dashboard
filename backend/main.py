@@ -1292,39 +1292,6 @@ def _run_and_stream(
 
     return proc.wait()
 
-
-# def _run_and_stream(
-#     job_dir: Path,
-#     cmd: list[str],
-#     cwd: Path,
-#     env=None,
-# ) -> int:
-#
-#     _append_log(job_dir, "\n$ " + " ".join(cmd) + "\n")
-#
-#     proc = subprocess.Popen(
-#         cmd,
-#         cwd=str(cwd),
-#         env=env,
-#         stdout=subprocess.PIPE,
-#         stderr=subprocess.STDOUT,
-#         text=True,
-#         bufsize=1,              #  line buffered
-#         universal_newlines=True #
-#     )
-#
-#     _write_json(job_dir / "pid.json", {"pid": proc.pid})
-#
-#     assert proc.stdout is not None
-#     for line in iter(proc.stdout.readline, ""):
-#         _append_log(job_dir, line)
-#
-#     return proc.wait()
-
-
-
-
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]  # adjust if needed
 # If this file is backend/md/runners/md_local.py then parents[2] -> .../ddd
 
@@ -1378,6 +1345,7 @@ def _launch_md_local(job_dir: Path) -> None:
         cmd.append("--do-em")
     elif preset.endswith("_eq"):
         cmd.extend(["--do-em", "--do-nvt", "--do-npt"])
+    # elif workflow == "run_md":
     elif preset.endswith("_prod") or workflow == "run_md":
         cmd.append("--do-md")
 
@@ -1566,6 +1534,7 @@ async def create_md_job(
         # Reuse system from ANY parent job (build / equil / md)
         # -------------------------------------------------
         start_gro = None
+        start_cpt = None
         if workflow == "run_md":
             parent_dir = _md_job_dir(parent_job_id)
             parent_out = parent_dir / "out"
@@ -1583,13 +1552,16 @@ async def create_md_job(
             for itp in parent_out.glob("*.itp"):
                 shutil.copy2(itp, out_dir / itp.name)
 
-            # Find BEST available starting structure (newest logic)
+            # Ensure Protein.itp is present (old system compatibility)
+            protein0 = out_dir / "Protein_0.itp"
+            protein = out_dir / "Protein.itp"
+
+            if protein0.exists() and not protein.exists():
+                shutil.copy2(protein0, protein)
+
+            # First find BEST available starting structure (newest logic)
             candidate_gros = [
-                "npt.gro",  # equilibrated system
-                "md.gro",  # if parent was an MD run
-                "nvt.gro",
-                "em.gro",
-                "system.gro",
+                "npt.gro", "md.gro", "nvt.gro", "em.gro", "system.gro",
             ]
 
             for fname in candidate_gros:
@@ -1603,6 +1575,24 @@ async def create_md_job(
                 return JSONResponse(
                     status_code=400,
                     content={"error": "No usable .gro found in parent job"},
+                )
+
+            # Second: find checkpoint (.cpt) — optional
+            candidate_cpts = [
+                "npt.cpt", "md.cpt", "nvt.cpt", "em.cpt",
+            ]
+
+            for fname in candidate_cpts:
+                f = parent_out / fname
+                if f.exists():
+                    start_cpt = fname
+                    shutil.copy2(f, out_dir / fname)
+                    break
+
+            if start_cpt is None:
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": "No usable .cpt found in parent job"},
                 )
 
 
@@ -1710,6 +1700,7 @@ async def create_md_job(
             "parent_job_id": parent_job_id,
             "md_ns": md_ns,
             "start_gro": start_gro,
+            "start_cpt": start_cpt,
             "gmx": {
                 "nt": 1,
                 "ntmpi": 1

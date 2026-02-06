@@ -6,13 +6,18 @@
 define                  =
 
 integrator              = md
-dt                      = 0.001      ; ultra-safe: 2 fs
-nsteps                  = 200000     ; 1 ns (adjust as needed)
+dt                      = 0.005      ; ultra-safe: 2 fs
+nsteps                  = 50000     ; 0.25 ns (adjust as needed)
+
+; Velocity generation (replica diversification)
+gen_vel  = yes
+gen_temp = 310
+gen_seed = -1     ; new random seed every time
 
 ; ----- Temperature control -----
 tcoupl                  = v-rescale
 tc-grps                 = Protein ORT POPC W ION
-tau-t                   = 1.0 1.0 1.0 1.0 1.0
+tau-t                   = 2.0 2.0 2.0 2.0 2.0
 ref-t                   = 310 310 310 310 310
 
 ; ----- Pressure control ------

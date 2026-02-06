@@ -35,7 +35,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
-
+import json
 
 MDP_DIR = Path(__file__).resolve().parent / "mdp_templates"
 
@@ -227,8 +227,7 @@ def step_martinize(cfg: PipelineConfig) -> PipelineConfig:
         "-x", cg_name,
         "-o", top_name,
         "-ff", "martini3001",
-        "-ss", "H",
-        # "-ss", "C",
+        "-ss", "C",
         "-name", cfg.protein_name,
         "-p", "backbone",
         "-pf", "1000",
@@ -278,7 +277,8 @@ def step_insane(cfg: PipelineConfig) -> None:
         "-dm",
         "0",
         "-box",
-        "15.0,15.0,17.0",
+        # "15.0,15.0,17.0",
+        "10.0,10.0,13.0",
     ]
     run(cmd, cwd=cfg.workdir)
 
@@ -570,88 +570,191 @@ def step_grompp_mdrun_nvt(cfg: PipelineConfig, nt: int) -> None:
 
 def step_grompp_mdrun_npt(cfg: PipelineConfig, nt: int) -> None:
     print("\n=== 8.2) NPT: grompp + mdrun ===")
-    c_in = cfg.workdir / f"{cfg.nvt_deffnm}.gro"
-    must_exist(c_in, "nvt.gro input for NPT")
 
-    run(
-        [
-            "gmx",
-            "grompp",
-            "-f",
-            str(cfg.npt_mdp),
-            "-c",
-            str(c_in),
-            "-r",
-            str(c_in),
-            "-p",
-            str(cfg.system_top),
-            "-o",
-            str(cfg.npt_tpr),
-            "-maxwarn",
-            "1",
-        ],
-        cwd=cfg.workdir,
-    )
+    workdir = cfg.workdir
+
+    # ------------------------------------------------
+    # Is this a continuation-run or a normal pipeline?
+    # ------------------------------------------------
+    params_file = workdir.parent / "input" / "params.json"
+    if not params_file.exists():
+        raise FileNotFoundError(f"Missing params.json: {params_file}")
+    params = json.loads(params_file.read_text())
+
+    continuation_mode = params.get("workflow") == "run_md"
+
+    # ------------------------------------------------
+    # Determine input structure for grompp
+    # ------------------------------------------------
+    if continuation_mode:
+        start_gro = params.get("start_gro")
+        if not start_gro:
+            raise RuntimeError("params.json must define 'start_gro' for continuation")
+
+        gro_in = workdir / start_gro
+
+        start_cpt = params.get("start_cpt")
+        cpt_in = workdir / start_cpt if start_cpt else None
+
+        if cpt_in is not None and not cpt_in.exists():
+            cpt_in = None
+
+    else:
+        gro_in = workdir / f"{cfg.nvt_deffnm}.gro"
+        cpt_in = None
+
+    # ------------------------------------------------
+    # Run grompp (must always get a .gro, never .cpt)
+    # ------------------------------------------------
+    cmd = [
+        "gmx", "grompp",
+        "-f", str(cfg.npt_mdp),
+        "-c", str(gro_in),
+        "-p", str(cfg.system_top),
+        "-o", str(cfg.npt_tpr),
+        "-maxwarn", "1",
+    ]
+
+    run(cmd, cwd=workdir)
     must_exist(cfg.npt_tpr, "npt.tpr")
 
-    run(
-        [
-            "gmx",
-            "mdrun",
-            "-ntmpi",
-            "1",
-            "-nt",
-            str(nt),
-            "-v",
-            "-deffnm",
-            cfg.npt_deffnm,
-        ],
-        cwd=cfg.workdir,
-    )
+    # ------------------------------------------------
+    # Run mdrun (can use -cpi checkpoint)
+    # ------------------------------------------------
+    mdrun_cmd = [
+        "gmx", "mdrun",
+        "-noappend",
+        "-ntmpi", "1",
+        "-nt", str(nt),
+        "-v",
+        "-deffnm", cfg.npt_deffnm,
+        # "-c", f"{cfg.npt_deffnm}.gro", # <<< FORCE OUTPUT NAME
+    ]
 
-    must_exist(cfg.workdir / f"{cfg.npt_deffnm}.gro", "npt.gro output")
+    if cpt_in:
+        mdrun_cmd.insert(3, "-cpi")
+        mdrun_cmd.insert(4, str(cpt_in))
+
+    run(mdrun_cmd, cwd=workdir)
+
+    # After successful mdrun and before checking npt.gro:
+    part = workdir / f"{cfg.npt_deffnm}.part0001.gro"
+    final = workdir / f"{cfg.npt_deffnm}.gro"
+
+    # If GROMACS wrote part0001, normalize it to npt.gro
+    if part.exists() and not final.exists():
+        part.rename(final)
+
+    must_exist(workdir / f"{cfg.npt_deffnm}.gro", "npt.gro output")
 
 
 def step_grompp_mdrun_md(cfg: PipelineConfig, nt: int) -> None:
     print("\n=== 8.3) PRODUCTION MD: grompp + mdrun ===")
-    c_in = cfg.workdir / f"{cfg.npt_deffnm}.gro"
-    must_exist(c_in, "npt.gro input for MD")
 
-    run(
-        [
-            "gmx",
-            "grompp",
-            "-f",
-            str(cfg.md_mdp),
-            "-c",
-            str(c_in),
-            "-p",
-            str(cfg.system_top),
-            "-o",
-            str(cfg.md_tpr),
-        ],
-        cwd=cfg.workdir,
-    )
-    must_exist(cfg.md_tpr, "md.tpr")
+    workdir = cfg.workdir
 
-    run(
-        [
-            "gmx",
-            "mdrun",
-            "-ntmpi",
-            "1",
-            "-nt",
-            str(nt),
-            "-v",
-            "-deffnm",
-            cfg.md_deffnm,
-        ],
-        cwd=cfg.workdir,
-    )
+    # ------------------------------------------------
+    # Load job parameters
+    # ------------------------------------------------
+    params_file = workdir.parent / "input" / "params.json"
+    if not params_file.exists():
+        raise FileNotFoundError(f"Missing params.json: {params_file}")
+
+    params = json.loads(params_file.read_text())
+
+    # ------------------------------------------------
+    # Determine the correct starting structure
+    # ------------------------------------------------
+    start_gro = params.get("start_gro", "npt.gro")
+    start_cpt = params.get("start_cpt")  # optional
+
+    gro_in = workdir / start_gro
+    if not gro_in.exists():
+        raise FileNotFoundError(f"start_gro '{start_gro}' not found")
+
+    cpt_in = workdir / start_cpt if start_cpt else None
+    if cpt_in is not None and not cpt_in.exists():
+        cpt_in = None
+
+    # ------------------------------------------------
+    # Generate MD TPR (uses md.mdp, NOT npt.mdp)
+    # ------------------------------------------------
+    run([
+        "gmx", "grompp",
+        "-f", str(cfg.md_mdp),
+        "-c", str(gro_in),
+        "-p", str(cfg.system_top),
+        "-o", str(cfg.md_tpr),
+        "-maxwarn", "1",
+    ], cwd=workdir)
+
+    # ------------------------------------------------
+    # Run MD
+    # ------------------------------------------------
+    mdrun_cmd = [
+        "gmx", "mdrun",
+        "-noappend",
+        "-ntmpi", "1",
+        "-nt", str(nt),
+        "-v",
+        "-deffnm", cfg.md_deffnm,
+    ]
+
+    if cpt_in:
+        mdrun_cmd.insert(3, "-cpi")
+        mdrun_cmd.insert(4, str(cpt_in))
+
+    run(mdrun_cmd, cwd=workdir)
+
+    # ------------------------------------------------
+    # Normalize output file names
+    # ------------------------------------------------
+    gro_final = workdir / f"{cfg.md_deffnm}.gro"
+    gro_part = workdir / f"{cfg.md_deffnm}.part0001.gro"
+    if not gro_final.exists() and gro_part.exists():
+        gro_part.rename(gro_final)
 
 
-from pathlib import Path
-import re
+# def step_grompp_mdrun_md(cfg: PipelineConfig, nt: int) -> None:
+#     print("\n=== 8.3) PRODUCTION MD: grompp + mdrun ===")
+#     c_in = cfg.workdir / f"{cfg.npt_deffnm}.gro"
+#     must_exist(c_in, "npt.gro input for MD")
+#
+#     run(
+#         [
+#             "gmx",
+#             "grompp",
+#             "-f",
+#             str(cfg.md_mdp),
+#             "-c",
+#             str(c_in),
+#             "-p",
+#             str(cfg.system_top),
+#             "-o",
+#             str(cfg.md_tpr),
+#         ],
+#         cwd=cfg.workdir,
+#     )
+#     must_exist(cfg.md_tpr, "md.tpr")
+#
+#     run(
+#         [
+#             "gmx",
+#             "mdrun",
+#             "-ntmpi",
+#             "1",
+#             "-nt",
+#             str(nt),
+#             "-v",
+#             "-deffnm",
+#             cfg.md_deffnm,
+#         ],
+#         cwd=cfg.workdir,
+#     )
+#
+#
+# from pathlib import Path
+# import re
 
 
 def merge_cg_pdbs(out_pdb: Path, *pdbs: Path) -> None:
@@ -854,6 +957,19 @@ def main(argv=None) -> None:
     args = parse_args(argv)
     cfg = build_config(args)
 
+    # ============================================
+    # MD-ONLY CONTINUATION MODE (SKIP FULL PIPELINE)
+    # ============================================
+    print("ARE YOU DOING MD? ", args.do_md)
+    if args.do_md:
+        print("MD-only mode detected -> skipping ALL build steps.")
+
+        # Directly run MD continuation
+        step_write_mdps(cfg)  # generates md.mdp
+        step_grompp_mdrun_md(cfg, nt=args.nt)
+        return
+
+
     ensure_dir(cfg.workdir)
 
     if not cfg.martini_ff or not cfg.martini_ff.exists():
@@ -993,8 +1109,8 @@ def main(argv=None) -> None:
     if args.do_npt:
         step_grompp_mdrun_npt(cfg, nt=args.nt)
 
-    if args.do_md:
-        step_grompp_mdrun_md(cfg, nt=args.nt)
+    # if args.do_md:
+    #     step_grompp_mdrun_md(cfg, nt=args.nt)
 
     print("\nDONE.")
     print("Visualize with:")
