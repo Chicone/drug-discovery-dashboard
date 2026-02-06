@@ -11,6 +11,9 @@ from backend.pipelines.core import (
     run_equilibration,
 )
 
+print(">>> WARNING: OLD build_and_equilibrate.py LOADED!")
+
+
 
 def main():
     parser = argparse.ArgumentParser()
