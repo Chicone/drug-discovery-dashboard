@@ -637,13 +637,14 @@ def step_grompp_mdrun_npt(cfg: PipelineConfig, nt: int) -> None:
 
     run(mdrun_cmd, cwd=workdir)
 
-    # After successful mdrun and before checking npt.gro:
-    part = workdir / f"{cfg.npt_deffnm}.part0001.gro"
-    final = workdir / f"{cfg.npt_deffnm}.gro"
+    # Normalize output names: npt.part0001.* → npt.*
+    suffixes = [".gro", ".log", ".edr", ".cpt", ".xtc"]
 
-    # If GROMACS wrote part0001, normalize it to npt.gro
-    if part.exists() and not final.exists():
-        part.rename(final)
+    for suf in suffixes:
+        part = workdir / f"{cfg.npt_deffnm}.part0001{suf}"
+        final = workdir / f"{cfg.npt_deffnm}{suf}"
+        if part.exists() and not final.exists():
+            part.rename(final)
 
     must_exist(workdir / f"{cfg.npt_deffnm}.gro", "npt.gro output")
 
@@ -672,9 +673,15 @@ def step_grompp_mdrun_md(cfg: PipelineConfig, nt: int) -> None:
     if not gro_in.exists():
         raise FileNotFoundError(f"start_gro '{start_gro}' not found")
 
-    cpt_in = workdir / start_cpt if start_cpt else None
-    if cpt_in is not None and not cpt_in.exists():
-        cpt_in = None
+    is_first_md_after_npt = (start_gro == "npt.gro")
+
+    # Only use checkpoint for continuation-type MD
+    if (start_cpt and not is_first_md_after_npt):
+        cpt_in = workdir / start_cpt
+        if not cpt_in.exists():
+            cpt_in = None
+    else:
+        cpt_in = None  # DO NOT use the NPT cpt for first MD
 
     # ------------------------------------------------
     # Generate MD TPR (uses md.mdp, NOT npt.mdp)
@@ -713,49 +720,6 @@ def step_grompp_mdrun_md(cfg: PipelineConfig, nt: int) -> None:
     gro_part = workdir / f"{cfg.md_deffnm}.part0001.gro"
     if not gro_final.exists() and gro_part.exists():
         gro_part.rename(gro_final)
-
-
-# def step_grompp_mdrun_md(cfg: PipelineConfig, nt: int) -> None:
-#     print("\n=== 8.3) PRODUCTION MD: grompp + mdrun ===")
-#     c_in = cfg.workdir / f"{cfg.npt_deffnm}.gro"
-#     must_exist(c_in, "npt.gro input for MD")
-#
-#     run(
-#         [
-#             "gmx",
-#             "grompp",
-#             "-f",
-#             str(cfg.md_mdp),
-#             "-c",
-#             str(c_in),
-#             "-p",
-#             str(cfg.system_top),
-#             "-o",
-#             str(cfg.md_tpr),
-#         ],
-#         cwd=cfg.workdir,
-#     )
-#     must_exist(cfg.md_tpr, "md.tpr")
-#
-#     run(
-#         [
-#             "gmx",
-#             "mdrun",
-#             "-ntmpi",
-#             "1",
-#             "-nt",
-#             str(nt),
-#             "-v",
-#             "-deffnm",
-#             cfg.md_deffnm,
-#         ],
-#         cwd=cfg.workdir,
-#     )
-#
-#
-# from pathlib import Path
-# import re
-
 
 def merge_cg_pdbs(out_pdb: Path, *pdbs: Path) -> None:
     """
@@ -839,31 +803,119 @@ def merge_cg_pdbs(out_pdb: Path, *pdbs: Path) -> None:
     out.append("END")
     out_pdb.write_text("\n".join(out) + "\n")
 
+import hashlib
 
-# def merge_cg_pdbs(out_pdb: Path, *pdbs: Path) -> None:
-#     """
-#     Merge multiple CG PDB files into a single PDB with
-#     properly renumbered ATOM/HETATM records.
-#     """
-#     out_lines = []
-#     atom_index = 1
-#
-#     for pdb in pdbs:
-#         for line in pdb.read_text().splitlines():
-#
-#             # Only ATOM/HETATM kept
-#             if not (line.startswith("ATOM") or line.startswith("HETATM")):
-#                 continue
-#
-#             # Rewrite atom index to be unique & consecutive
-#             new_line = (line[:6] + f"{atom_index:5d}" + line[11:])
-#             out_lines.append(new_line)
-#             atom_index += 1
-#
-#     # Add final END
-#     out_lines.append("END")
-#
-#     out_pdb.write_text("\n".join(out_lines) + "\n")
+def file_hash(path: Path) -> str:
+    h = hashlib.sha256()
+    h.update(path.read_bytes())
+    return h.hexdigest()
+
+def compute_cache_key(protein_aa: Path,
+                      ligand_aa: Optional[Path],
+                      smiles: str) -> str:
+
+    h = hashlib.sha256()
+    h.update(protein_aa.read_bytes())
+
+    if ligand_aa and ligand_aa.exists():
+        h.update(ligand_aa.read_bytes())
+    else:
+        h.update(b"NO-LIGAND")
+
+    h.update(smiles.encode("utf8"))
+
+    return h.hexdigest()[:16]
+
+
+def cache_check_before_martinize(cfg, args, cache_root: Path):
+    """
+    Checks whether a cached martinized complex exists.
+    If yes:
+        - restores all CG files into cfg.workdir
+        - returns (True, updated_cfg, cache_dir)
+    If no:
+        - returns (False, cfg, cache_dir)
+    """
+
+    # Build simple cache key from protein + ligand AA PDBs
+    import hashlib
+    hasher = hashlib.sha256()
+
+    # Protein AA PDB (cleaned)
+    hasher.update(cfg.aa_pdb.read_bytes())
+
+    # Ligand AA PDB (if present)
+    if args.orthosteric_pdb:
+        lig = Path(args.orthosteric_pdb)
+        if lig.exists():
+            hasher.update(lig.read_bytes())
+
+    key = hasher.hexdigest()[:16]
+    cache_dir = cache_root / key
+
+    # If cache does not exist → miss
+    if not cache_dir.exists():
+        print(f"\n[CACHE MISS] No cached martinized complex ({key})")
+        return False, cfg, cache_dir
+
+    # Otherwise → HIT
+    print(f"\n[CACHE HIT] Using cached martinized complex: {cache_dir}")
+
+    # Restore important files
+    restore_list = [
+        "Protein.top",
+        "Protein_0.itp",
+        "Protein.itp",
+        "Protein_cg.pdb",
+        "orthosteric_aa.pdb",
+        "orthosteric_cg.pdb",
+        "Orthosteric.itp",
+        "cg_complex.pdb",
+    ]
+
+    for fname in restore_list:
+        src = cache_dir / fname
+        if src.exists():
+            shutil.copy2(src, cfg.workdir / fname)
+
+    # Update cfg with restored paths
+    new_cfg = cfg.__class__(**{
+        **cfg.__dict__,
+        "cg_pdb": cfg.workdir / "cg_complex.pdb",
+        "cg_top": cfg.workdir / "Protein.top",
+        "itp_src": cfg.workdir / "Protein_0.itp",
+        "itp_dst": cfg.workdir / "Protein.itp",
+        "orth_itp": (cfg.workdir / "Orthosteric.itp")
+                    if (cache_dir / "Orthosteric.itp").exists()
+                    else None,
+    })
+
+    return True, new_cfg, cache_dir
+
+def cache_save_after_martinize(cfg, cache_dir: Path):
+    """
+    Save the martinized protein + ligand CG complex into cache_dir.
+    Only files that matter before INSANE are saved.
+    """
+    restore_list = [
+        "Protein.top",
+        "Protein_0.itp",
+        "Protein.itp",
+        "Protein_cg.pdb",
+        "orthosteric_aa.pdb",
+        "orthosteric_cg.pdb",
+        "Orthosteric.itp",
+        "cg_complex.pdb",
+    ]
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    for fname in restore_list:
+        src = cfg.workdir / fname
+        if src.exists():
+            shutil.copy2(src, cache_dir / fname)
+
+    print(f"[CACHE SAVED] Martinized complex stored in: {cache_dir}")
 
 
 
@@ -957,6 +1009,9 @@ def main(argv=None) -> None:
     args = parse_args(argv)
     cfg = build_config(args)
 
+    CG_CACHE = Path("backend/data/cg_cache")
+    CG_CACHE.mkdir(parents=True, exist_ok=True)
+
     # ============================================
     # MD-ONLY CONTINUATION MODE (SKIP FULL PIPELINE)
     # ============================================
@@ -1001,6 +1056,11 @@ def main(argv=None) -> None:
         ortho_aa = cfg.workdir / "orthosteric_aa.pdb"
         extract_ligand(Path(args.orthosteric_pdb), ortho_aa)
 
+    # CACHE CHECK
+    hit, cfg, cache_dir = cache_check_before_martinize(cfg, args, CG_CACHE)
+    SKIP_LIG = hit  # skip ligand build if cache hit
+    args.skip_martinize = hit
+
     # ===============================================================
     # 3) Martinize PROTEIN
     # ===============================================================
@@ -1022,16 +1082,15 @@ def main(argv=None) -> None:
     orth_itp = None
     orth_cg = None
 
-    if args.orthosteric_pdb:
+    if args.orthosteric_pdb and not SKIP_LIG:
+        # Fresh ligand build
         from .ligand_cg_builder import build_ligand
 
         SMILES_ORTHO = "n1c(N2CCCCC2)c(C#N)c(c3ccccc3)c(C#N)c(N)1"
 
-        # 1) Output paths for ligand CG + itp
         orth_cg = cfg.workdir / "orthosteric_cg.pdb"
         orth_itp = cfg.workdir / "Orthosteric.itp"
 
-        # 2) Build ligand CG model (chemistry from SMILES, pose from PDB)
         build_ligand(
             SMILES_ORTHO,
             complex_pdb=Path(args.orthosteric_pdb),
@@ -1039,42 +1098,36 @@ def main(argv=None) -> None:
             itp_out=orth_itp,
         )
 
-        # 2b) Patch ligand ITP bead sizes (Regular -> Small)
         patch_small_beads(orth_itp)
 
-        # 3) Merge PROTEIN + LIGAND into cg_complex.pdb
+        # Combine protein + ligand into cg_complex.pdb
         cg_complex = cfg.workdir / "cg_complex.pdb"
-        merge_cg_pdbs(
-            cg_complex,
-            cfg.cg_pdb,  # protein CG
-            orth_cg  # ligand CG
-        )
+        merge_cg_pdbs(cg_complex, cfg.cg_pdb, orth_cg)
 
-        # # --- RECENTER MERGED COMPLEX BEFORE INSANE ---
-        # cg_centered = cfg.workdir / "cg_complex_centered.pdb"
-        #
-        # run([
-        #     "gmx", "editconf",
-        #     "-f", str(cg_complex),
-        #     "-o", str(cg_centered),
-        #     "-center",  "0", "0", "0", # center molecule
-        #     "-box", "15.0", "15.0", "15.0",  # same as INSANE box
-        # ], cwd=cfg.workdir)
-
-        # 4) Update cfg so INSANE uses the combined CG
+        # Update cfg
         cfg = cfg.__class__(**{
             **cfg.__dict__,
             "cg_pdb": cg_complex,
             "orth_itp": orth_itp,
         })
 
-    else:
-        # no ligand
+        # Save to cache since ligand was built now
+        cache_save_after_martinize(cfg, cache_dir)
+
+    elif args.orthosteric_pdb and SKIP_LIG:
+        # CACHE HIT → use restored ligand
+        cfg = cfg.__class__(**{
+            **cfg.__dict__,
+            "orth_itp": cfg.workdir / "Orthosteric.itp",
+            "cg_pdb": cfg.workdir / "cg_complex.pdb",
+        })
+
+    elif not args.orthosteric_pdb:
+        # No ligand in this project
         cfg = cfg.__class__(**{
             **cfg.__dict__,
             "orth_itp": None,
         })
-
 
     # ===============================================================
     # 5) INSANE: build the membrane
