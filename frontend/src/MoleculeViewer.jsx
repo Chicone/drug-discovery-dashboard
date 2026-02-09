@@ -50,15 +50,11 @@ function applyLigandStyle(viewer) {
 }
 
 
-// --- Unified style selector ---
-// isLigand = true → always keep stick representation visible
-const styleObjFor = (style, isLigand) => {
-  if (isLigand) {
-    // ligand is ALWAYS sticks, regardless of chosen style
+const styleObjFor = (style, isLigand, forceStick = false) => {
+  if (isLigand && forceStick) {
     return { stick: { colorscheme: "greenCarbon", radius: 0.25 } };
   }
 
-  // protein style depends on user selection
   switch (style) {
     case "cartoon":
       return { cartoon: { color: "spectrum" } };
@@ -71,9 +67,13 @@ const styleObjFor = (style, isLigand) => {
     case "cross":
       return { cross: {} };
     default:
-      return { stick: { radius: 0.2 } };
-  }
+      if (!isLigand) {
+        return { cartoon: { color: "spectrum" } };
+      }
+      // ligands default to sticks
+      return { stick: { radius: 0.2 } };  }
 };
+
 
 
 
@@ -422,8 +422,10 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
       }
     };
 
-    const proteinStyle = styleObjFor(style, false);
-    const ligandStyle = styleObjFor(style, true);
+    // PDB MODE (protein + ligand) → ligand must remain sticks
+    const proteinStyle = styleObjFor(style, false, false);
+    const ligandStyle = styleObjFor(style, true, true);
+
 
     if (hasProtein && hasLigand) {
       safeSetStyle({ resn: AMINO_ACIDS_ARR }, proteinStyle);
@@ -510,7 +512,8 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
         const prevView2 = hasRenderedOnceRef.current ? viewer.getView() : null;
 
         viewer.addModel(molData, "mol");
-        viewer.setStyle({}, styleObjFor(style, true));
+        const molStyle = styleObjFor(style, true, false); // ligand follows user style
+        viewer.setStyle({}, molStyle);
 
         if (prevView2) {
           viewer.setView(prevView2);

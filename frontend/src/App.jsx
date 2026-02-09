@@ -14,10 +14,10 @@ import { useTheme } from "@mui/material/styles";
 
 import MolecularDesign from "./pages/MolecularDesign.jsx";
 import Docking from "./pages/Docking.jsx";
+import MolecularDynamics from "./pages/MolecularDynamics.jsx";
 import AdmetAnalysis from "./pages/AdmetAnalysis.jsx";
 import Library from "./pages/Library.jsx";
 import Reports from "./pages/Reports.jsx";
-import MolecularDynamics from "./pages/MolecularDynamics.jsx";
 
 import logo from "./assets/logo.png";
 
@@ -32,13 +32,13 @@ export default function App() {
       case 1:
         return <Docking />;
       case 2:
-        return <AdmetAnalysis />;
+      return <MolecularDynamics />;
       case 3:
-        return <Library />;
+        return <AdmetAnalysis />;
       case 4:
-        return <Reports />;
+        return <Library />;
       case 5:
-        return <MolecularDynamics />;
+        return <Reports />;
       default:
         return null;
     }
@@ -140,10 +140,10 @@ export default function App() {
           >
             <Tab label="Molecular Design" />
             <Tab label="Docking" />
+            <Tab label="Molecular Dynamics" />
             <Tab label="ADMET" />
             <Tab label="Library" />
             <Tab label="Reports" />
-            <Tab label="Molecular Dynamics" />
           </Tabs>
         </Toolbar>
       </AppBar>
