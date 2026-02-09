@@ -223,7 +223,7 @@ function Docking() {
 
 		try {
 			const res = await fetch(
-				"/api/dock_vina",
+				"/api/docking/vina",
 				{
 					method: "POST",
 					body: formData,

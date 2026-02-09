@@ -16,6 +16,59 @@ const AMINO_ACIDS_SET = new Set(AMINO_ACIDS_ARR);
  *  - pdbFile?: File           // File object from <input type=file>
  *  - pdbUrl?: string          // URL to fetch a PDB from
  */
+
+ const getStyleFromSelection = () => {
+  switch (style) {
+    case "stick":
+      return { stick: { colorscheme: "greenCarbon", radius: 0.25 } };
+
+    case "sphere":
+      return { sphere: { scale: 0.3 } };
+
+    case "ballstick":
+      return { ballAndStick: {} };
+
+    case "line":
+      return { line: {} };
+
+    case "cross":
+      return { cross: {} };
+
+    case "cartoon":
+      return { cartoon: { color: "spectrum" } };
+
+    default:
+      return { stick: { colorscheme: "greenCarbon", radius: 0.25 } };
+  }
+};
+
+const styleObjFor = (mode, isLigand = false) => {
+  switch (mode) {
+    case "stick":
+      return { stick: { colorscheme: isLigand ? "greenCarbon" : "spectrum", radius: 0.2 } };
+
+    case "sphere":
+      return { sphere: { scale: 0.3 } };
+
+    case "ballstick":
+      return { stick: { radius: 0.2 }, sphere: { scale: 0.25 } };
+
+    case "line":
+      return { line: {} };
+
+    case "cross":
+      return { cross: {} };
+
+    case "cartoon":
+      return { cartoon: { color: "spectrum" } };
+
+    default:
+      return { stick: { colorscheme: isLigand ? "greenCarbon" : "spectrum", radius: 0.2 } };
+  }
+};
+
+
+
 export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
   const [manualHelixMap, setManualHelixMap] = useState(null); // object or null
   const [structureKey, setStructureKey] = useState("");       // e.g. "2YDV"
@@ -360,33 +413,19 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
       }
     };
 
-    if (hasProtein && hasLigand) {
-      // Protein as cartoon
-      safeSetStyle(
-        { resn: AMINO_ACIDS_ARR },
-        { cartoon: { color: "spectrum" } }
-      );
+const proteinStyle = styleObjFor(style, false);
+const ligandStyle = styleObjFor(style, true);
 
-      // Ligand / non-protein as sticks
-      safeSetStyle(
-        { not: { resn: AMINO_ACIDS_ARR } },
-        { stick: { colorscheme: "greenCarbon", radius: 0.2 } }
-      );
+if (hasProtein && hasLigand) {
+  safeSetStyle({ resn: AMINO_ACIDS_ARR }, proteinStyle);
+  safeSetStyle({ not: { resn: AMINO_ACIDS_ARR } }, ligandStyle);
 
-    } else if (hasProtein) {
-      // Protein only
-      safeSetStyle(
-        {},
-        { cartoon: { color: "spectrum" } }
-      );
+} else if (hasProtein) {
+  safeSetStyle({}, proteinStyle);
 
-    } else {
-      // Ligand only
-      safeSetStyle(
-        {},
-        { stick: { colorscheme: "greenCarbon", radius: 0.2 } }
-      );
-    }
+} else {
+  safeSetStyle({}, ligandStyle);
+}
 
 
     // --- Override selected helices to sticks ---
@@ -453,7 +492,7 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
       viewer.removeAllModels();
 
 
-      fetch(`/api/mol3d?smiles=${encodeURIComponent(smiles)}`)
+      fetch(`/api/molecules/mol3d?smiles=${encodeURIComponent(smiles)}`)
         .then((r) => r.text())
         .then((molData) => {
         if (!molData) return;
@@ -462,7 +501,7 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
         const prevView2 = hasRenderedOnceRef.current ? viewer.getView() : null;
 
         viewer.addModel(molData, "mol");
-        viewer.setStyle({}, { stick: { colorscheme: "cyanCarbon" } });
+        viewer.setStyle({}, styleObjFor(style, true));
 
         if (prevView2) {
           viewer.setView(prevView2);
@@ -477,9 +516,10 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
 
         .catch(() => setErr("Failed to load 3D structure from SMILES."));
     }
-  }, [pdbText, pdbFile, smiles, selectedHelixKeys, useManualMap, structureKey, manualHelixMap]);
+  }, [pdbText, pdbFile, smiles, selectedHelixKeys, useManualMap, structureKey, manualHelixMap, style]);
 
-  const showStyleSelector = !(pdbText || pdbFile || pdbUrl);
+  const showStyleSelector = true;
+//   const showStyleSelector = !(pdbText || pdbFile || pdbUrl);
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start", width: "100%" }}>

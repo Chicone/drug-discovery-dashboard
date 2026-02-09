@@ -15,8 +15,29 @@ from backend.services.md_jobs import (
     stop_job,
     _md_job_dir,
 )
+from backend.services.md_jobs import run_cgmd_setup_job
+
+# ------------------------------------------------------
+# Models
+# ------------------------------------------------------
+from pydantic import BaseModel
 
 router = APIRouter()
+
+class MartiniSetupRequest(BaseModel):
+    workdir: str
+    aa_pdb: str
+    name: str
+    martini_ff: str
+    nt: int = 1
+    do_em: bool = False
+    do_nvt: bool = False
+    do_npt: bool = False
+    do_md: bool = False
+
+@router.post("/run-cgmd-setup")
+def run_cgmd_setup(request: MartiniSetupRequest):
+    return run_cgmd_setup_job(request)
 
 @router.post("/jobs")
 async def create_md_job(
@@ -41,6 +62,8 @@ async def create_md_job(
         orthosteric_ligand,
         allosteric_pose,
     )
+
+
 
 
 @router.get("/jobs")
@@ -135,6 +158,7 @@ def stop_md_job(job_id: str):
         )
 
     return {"status": "stopped", "job_id": job_id}
+
 
 
 
