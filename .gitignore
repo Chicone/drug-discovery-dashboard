@@ -43,6 +43,11 @@ backend/data/docking_runs/
 backend/data/md_runs/
 backend/data/
 
+# Root-level runtime folders
+data/
+smiles/
+
+
 
 AutoMartini_M3/
 
