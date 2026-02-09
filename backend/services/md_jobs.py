@@ -17,6 +17,17 @@ import os
 import sys
 import threading
 import signal
+from backend.services.md_helpers import MD_RUNS_DIR
+
+
+from backend.services.md_helpers import (
+    md_job_dir,
+    safe_mkdir,
+    write_json,
+    read_json,
+    md_status_from_dir,
+)
+
 # ============================================================
 # PATHS
 # ============================================================
@@ -812,6 +823,37 @@ def delete_job(job_id: str) -> bool:
 
     shutil.rmtree(job_dir)
     return True
+
+from backend.pipelines.pipeline import main as run_pipeline
+
+def run_cgmd_setup_job(request):
+    print("REQUEST BODY:", request.model_dump())
+
+    args = [
+        "--workdir", request.workdir,
+        "--aa_pdb", request.aa_pdb,
+        "--name", request.name,
+        "--martini_ff", request.martini_ff,
+        "--nt", str(request.nt),
+    ]
+
+    # Optional orthosteric ligand PDB
+    if getattr(request, "orthosteric_pdb", None) is not None:
+        args += ["--orthosteric_pdb", request.orthosteric_pdb]
+
+    # Pipeline stages
+    if request.do_em:
+        args.append("--do-em")
+    if request.do_nvt:
+        args.append("--do-nvt")
+    if request.do_npt:
+        args.append("--do-npt")
+    if request.do_md:
+        args.append("--do-md")
+
+    run_pipeline(args)
+    return {"status": "ok"}
+
 
 
 
