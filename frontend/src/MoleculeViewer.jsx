@@ -42,30 +42,39 @@ const AMINO_ACIDS_SET = new Set(AMINO_ACIDS_ARR);
   }
 };
 
-const styleObjFor = (mode, isLigand = false) => {
-  switch (mode) {
-    case "stick":
-      return { stick: { colorscheme: isLigand ? "greenCarbon" : "spectrum", radius: 0.2 } };
+function applyLigandStyle(viewer) {
+  viewer.setStyle(
+    { not: { resn: AMINO_ACIDS_ARR } }, // ligand / non-protein
+    { stick: { colorscheme: "greenCarbon", radius: 0.25 } }
+  );
+}
 
-    case "sphere":
-      return { sphere: { scale: 0.3 } };
 
-    case "ballstick":
-      return { stick: { radius: 0.2 }, sphere: { scale: 0.25 } };
+// --- Unified style selector ---
+// isLigand = true → always keep stick representation visible
+const styleObjFor = (style, isLigand) => {
+  if (isLigand) {
+    // ligand is ALWAYS sticks, regardless of chosen style
+    return { stick: { colorscheme: "greenCarbon", radius: 0.25 } };
+  }
 
-    case "line":
-      return { line: {} };
-
-    case "cross":
-      return { cross: {} };
-
+  // protein style depends on user selection
+  switch (style) {
     case "cartoon":
       return { cartoon: { color: "spectrum" } };
-
+    case "sphere":
+      return { sphere: {} };
+    case "ballstick":
+      return { stick: {}, sphere: { scale: 0.3 } };
+    case "line":
+      return { line: {} };
+    case "cross":
+      return { cross: {} };
     default:
-      return { stick: { colorscheme: isLigand ? "greenCarbon" : "spectrum", radius: 0.2 } };
+      return { stick: { radius: 0.2 } };
   }
 };
+
 
 
 
@@ -413,19 +422,19 @@ export default function MoleculeViewer({ smiles, pdbText, pdbFile, pdbUrl }) {
       }
     };
 
-const proteinStyle = styleObjFor(style, false);
-const ligandStyle = styleObjFor(style, true);
+    const proteinStyle = styleObjFor(style, false);
+    const ligandStyle = styleObjFor(style, true);
 
-if (hasProtein && hasLigand) {
-  safeSetStyle({ resn: AMINO_ACIDS_ARR }, proteinStyle);
-  safeSetStyle({ not: { resn: AMINO_ACIDS_ARR } }, ligandStyle);
+    if (hasProtein && hasLigand) {
+      safeSetStyle({ resn: AMINO_ACIDS_ARR }, proteinStyle);
+      safeSetStyle({ not: { resn: AMINO_ACIDS_ARR } }, ligandStyle);
 
-} else if (hasProtein) {
-  safeSetStyle({}, proteinStyle);
+    } else if (hasProtein) {
+      safeSetStyle({}, proteinStyle);
 
-} else {
-  safeSetStyle({}, ligandStyle);
-}
+    } else {
+      safeSetStyle({}, ligandStyle);
+    }
 
 
     // --- Override selected helices to sticks ---
