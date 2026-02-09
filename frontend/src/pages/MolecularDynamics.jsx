@@ -135,7 +135,7 @@ function MolecularDynamics() {
   }, [historyLimit]);
 
   useEffect(() => {
-    const t = setInterval(() => loadRecentJobs(historyLimit), 2000);
+    const t = setInterval(() => loadRecentJobs(historyLimit), 1000);
     return () => clearInterval(t);
   }, [historyLimit]);
 
@@ -310,7 +310,7 @@ async function createRunJob() {
 
 
   async function pollJob(id) {
-    const intervalMs = 2000;
+    const intervalMs = 1000;
     let timer = null;
 
     async function tick() {
