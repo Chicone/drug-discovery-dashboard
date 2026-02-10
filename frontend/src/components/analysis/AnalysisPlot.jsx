@@ -129,4 +129,10 @@ export default function AnalysisPlot({ title = "Plot", plotData, plotMode }) {
             xaxis: { title: "Time (ns)", showline: true, linecolor: "white" },
             yaxis: { title: "RMSD (Å)", showline: true, linecolor: "white" },
           }}
-          style={{ width: "100%", he
+          style={{ width: "100%", height: "100%" }}
+          config={{ displayModeBar: false }}
+        />
+      </Box>
+    </Box>
+  );
+}
