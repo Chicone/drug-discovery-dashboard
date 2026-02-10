@@ -11,12 +11,11 @@ import {
   FormControl,
   InputLabel,
 } from "@mui/material";
-import Plot from "react-plotly.js";
+import AnalysisPlot from "../components/analysis/AnalysisPlot";
 
 export default function Analysis() {
   const [jobs, setJobs] = useState([]);
   const [selectedJobs, setSelectedJobs] = useState([]);
-  const [analysisData, setAnalysisData] = useState(null);
   const [plotData, setPlotData] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -53,14 +52,9 @@ const runRMSD = async () => {
   setLoading(false);
 };
 
-const dt_ps = Number(
-  plotData?.replicas?.find((r) => r?.timestep_ps != null)?.timestep_ps
-);
+const [plotMode, setPlotMode] = useState("aggregate");
+// "aggregate" | "individual"
 
-const x_ns =
-  plotData?.aggregate?.mean?.map((_, i) =>
-    Number.isFinite(dt_ps) ? (i * dt_ps) / 1000.0 : i
-  ) ?? [];
 
 
   return (
@@ -98,29 +92,24 @@ const x_ns =
         </Button>
       </Stack>
 
-      {/* Plot */}
-     {plotData && plotData.aggregate && (
-          <Box sx={{ mt: 4 }}>
-            <Plot
-              data={[
-                { x: x_ns, y: plotData.aggregate.mean, type: "scatter", mode: "lines", name: "Mean RMSD" },
-                { x: x_ns, y: plotData.aggregate.min,  type: "scatter", mode: "lines", name: "Min" },
-                { x: x_ns, y: plotData.aggregate.max,  type: "scatter", mode: "lines", name: "Max" },
-              ]}
-              layout={{
-                title: "Ligand RMSD over Time",
-                paper_bgcolor: "#121212",
-                plot_bgcolor: "#121212",
-                font: { color: "white" },
-                margin: { t: 60, r: 40, b: 80, l: 60 },
-                xaxis: { title: { text: "Time (ns)" }, showline: true, linecolor: "white" },
-                yaxis: { title: { text: "RMSD (Å)" }, showline: true, linecolor: "white" },
-              }}
-              style={{ width: "100%", height: "500px" }}
-              config={{ displayModeBar: false }}
-            />
-          </Box>
-        )}
+      <FormControl sx={{ minWidth: 200 }}>
+        <InputLabel sx={{ color: "#ccc" }}>Plot Mode</InputLabel>
+        <Select
+          value={plotMode}
+          label="Plot Mode"
+          onChange={(e) => setPlotMode(e.target.value)}
+          sx={{ color: "white" }}
+        >
+          <MenuItem value="aggregate">Aggregate (mean/min/max)</MenuItem>
+          <MenuItem value="individual">Individual traces</MenuItem>
+        </Select>
+      </FormControl>
+
+      <AnalysisPlot
+        title="Ligand RMSD"
+        plotData={plotData}
+        plotMode={plotMode}
+      />
 
     </Paper>
   );

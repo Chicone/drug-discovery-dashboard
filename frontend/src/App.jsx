@@ -18,6 +18,8 @@ import MolecularDynamics from "./pages/MolecularDynamics.jsx";
 import AdmetAnalysis from "./pages/AdmetAnalysis.jsx";
 import Library from "./pages/Library.jsx";
 import Reports from "./pages/Reports.jsx";
+import Analysis from "./pages/Analysis.jsx";
+
 
 import logo from "./assets/logo.png";
 
@@ -34,10 +36,12 @@ export default function App() {
       case 2:
       return <MolecularDynamics />;
       case 3:
-        return <AdmetAnalysis />;
+        return <Analysis />;
       case 4:
-        return <Library />;
+        return <AdmetAnalysis />;
       case 5:
+        return <Library />;
+      case 6:
         return <Reports />;
       default:
         return null;
@@ -141,6 +145,7 @@ export default function App() {
             <Tab label="Molecular Design" />
             <Tab label="Docking" />
             <Tab label="Molecular Dynamics" />
+            <Tab label="Analysis" />
             <Tab label="ADMET" />
             <Tab label="Library" />
             <Tab label="Reports" />
