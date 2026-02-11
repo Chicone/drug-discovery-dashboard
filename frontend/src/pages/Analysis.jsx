@@ -18,6 +18,8 @@ export default function Analysis() {
   const [selectedJobs, setSelectedJobs] = useState([]);
   const [plotData, setPlotData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [whiteBG, setWhiteBG] = useState(false);
+
 
 console.log("plotData NOW:", plotData);
 
@@ -105,10 +107,26 @@ const [plotMode, setPlotMode] = useState("aggregate");
         </Select>
       </FormControl>
 
+{/* White background toggle */}
+<Box sx={{ ml: 2, display: "flex", alignItems: "center" }}>
+  <label style={{ color: "white", cursor: "pointer" }}>
+    <input
+      type="checkbox"
+      checked={whiteBG}
+      onChange={() => setWhiteBG(!whiteBG)}
+      style={{ marginRight: 8 }}
+    />
+    White background (export)
+  </label>
+</Box>
+
+
       <AnalysisPlot
         title="Ligand RMSD"
         plotData={plotData}
         plotMode={plotMode}
+        whiteBG={whiteBG}
+
       />
 
     </Paper>

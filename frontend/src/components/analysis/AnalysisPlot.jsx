@@ -2,7 +2,8 @@
 import Plot from "react-plotly.js";
 import { Box, Typography } from "@mui/material";
 
-export default function AnalysisPlot({ title = "Plot", plotData, plotMode }) {
+
+export default function AnalysisPlot({ title = "Plot", plotData, plotMode, whiteBG }) {
   // When no data yet
   if (!plotData) {
     return (
@@ -119,19 +120,35 @@ export default function AnalysisPlot({ title = "Plot", plotData, plotMode }) {
         <Plot
           data={traces}
           layout={{
-            title:
-              plotMode === "aggregate"
-                ? "Ligand RMSD — Aggregate"
-                : "Ligand RMSD — Individual Traces",
-            paper_bgcolor: "#111",
-            plot_bgcolor: "#111",
-            font: { color: "white" },
-            margin: { t: 60, r: 40, b: 80, l: 60 },
-            xaxis: { title: { text: "Time (ns)" }, showline: true, linecolor: "white" },
-            yaxis: { title: { text: "RMSD (Å)" }, showline: true, linecolor: "white" },
-          }}
+          title:
+            plotMode === "aggregate"
+              ? "Ligand RMSD — Aggregate"
+              : "Ligand RMSD — Individual Traces",
+
+          // Switch styles depending on toggle:
+          template: whiteBG ? "plotly_white" : undefined,
+          paper_bgcolor: whiteBG ? "white" : "#111",
+          plot_bgcolor: whiteBG ? "white" : "#111",
+
+          font: { color: whiteBG ? "black" : "white" },
+
+          margin: { t: 60, r: 40, b: 80, l: 60 },
+
+          xaxis: {
+            title: { text: "Time (ns)" },
+            showline: true,
+            linecolor: whiteBG ? "black" : "white",
+          },
+
+          yaxis: {
+            title: { text: "RMSD (Å)" },
+            showline: true,
+            linecolor: whiteBG ? "black" : "white",
+          },
+        }}
+
           style={{ width: "100%", height: "100%" }}
-          config={{ displayModeBar: false }}
+          config={{ displayModeBar: true }}
         />
       </Box>
     </Box>
