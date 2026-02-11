@@ -72,6 +72,11 @@ function MolecularDynamics() {
       { id: "m3_popc_em", label: "Martini 3: POPC + EM" },
       { id: "m3_popc_eq", label: "Martini 3: POPC + EM + NVT + NPT" },
       { id: "m3_popc_prod", label: "Martini 3: POPC production" },
+      {
+        id: "m3_popc_full",
+        label: "Martini 3: POPC — Build + EQ + Production",
+      },
+
     ],
     []
   );
@@ -85,7 +90,7 @@ function MolecularDynamics() {
   );
 
   const runPresets = useMemo(
-    () => presetsAll.filter((p) => p.id.includes("m3_popc_prod")),
+    () => presetsAll.filter((p) => p.id.includes("prod") || p.id.includes("full")),
     [presetsAll]
   );
 
@@ -314,6 +319,16 @@ async function createRunJob() {
       return;
   }
 
+  // If full preset → start fresh (no parent), full workflow
+  if (presetRun === "m3_popc_full") {
+    return submitJob({
+      preset: presetRun,
+      workflow: "build_and_run_full",   // ← NEW workflow name you handle in backend
+      parentJobId: null,
+    });
+  }
+
+  // Normal production-only run
   return submitJob({
     preset: presetRun,
     workflow: "run_md",

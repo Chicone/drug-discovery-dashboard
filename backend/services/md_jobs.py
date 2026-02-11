@@ -39,6 +39,7 @@ PIPELINE_BY_WORKFLOW = {
     "build_only": "backend.pipelines.pipeline",
     "build_and_equilibrate": "backend.pipelines.pipeline",
     "run_md": "backend.pipelines.pipeline",
+    "build_and_run_full": "backend.pipelines.pipeline",
 }
 
 # ============================================================
@@ -82,6 +83,7 @@ def create_md_job_service(
             "build_only",
             "build_and_equilibrate",
             "run_md",
+            "build_and_run_full",
         }
         if workflow not in allowed_workflow:
             return JSONResponse(status_code=400,
@@ -115,6 +117,11 @@ def create_md_job_service(
                     status_code=404,
                     content={"error": "parent_job_id not found"},
                 )
+        if workflow == "build_and_run_full":
+            # Treat it like build_and_equilibrate…
+            # …but tell the container it must continue into production
+            preset = "m3_popc_full"  # define a new preset in your preset list
+            parent_job_id = None  # fresh system
 
         # Validate scenario requirements (Option A: orthosteric can be extracted)
         if scenario == "protein_plus_orthosteric" and orthosteric_ligand is None:
@@ -337,13 +344,24 @@ def create_md_job_service(
         }
         _write_json(input_dir / "params.json", params)
 
+        import traceback
+
         try:
             _launch_md_local(job_dir)
             _write_json(job_dir / "status.json", {"status": "running"})
-        except Exception:
+        except Exception as e:
+            tb = traceback.format_exc()
+            # write to job log so you can see it from the UI
+            (job_dir / "log.txt").write_text(
+                "FAILED TO LAUNCH LOCAL MD JOB\n\n"
+                f"Exception: {repr(e)}\n\n"
+                f"Traceback:\n{tb}\n",
+                encoding="utf-8",
+            )
+            _write_json(job_dir / "status.json", {"status": "error", "error": str(e)})
             return JSONResponse(
                 status_code=500,
-                content={"error": "Failed to launch local MD job"},
+                content={"error": f"Failed to launch local MD job: {e}"},
             )
 
         # try:
@@ -582,6 +600,9 @@ def _launch_md_local(job_dir: Path) -> None:
 
     if "MARTINI_FF" in env:
         cmd += ["--martini_ff", env["MARTINI_FF"]]
+
+    if workflow == "build_and_run_full":
+        cmd.extend(["--do-em", "--do-nvt", "--do-npt"])
 
     preset = params.get("preset", "")
 

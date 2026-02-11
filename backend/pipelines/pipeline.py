@@ -727,8 +727,8 @@ def step_grompp_mdrun_md(cfg: PipelineConfig, nt: int) -> None:
         "gmx", "mdrun",
         "-noappend",
         "-ntmpi", "1",
-        "-nt", str(4),
-        # "-nt", str(nt),
+        # "-nt", str(4),
+        "-nt", str(nt),
         "-v",
         "-deffnm", cfg.md_deffnm,
     ]
@@ -1248,7 +1248,24 @@ def main(argv=None) -> None:
         "-o", str(cfg.workdir / "system.pdb"),
     ], cwd=cfg.workdir)
 
+    # ===============================================================
+    # NEW: preset-controlled pipeline
+    # ===============================================================
+    params_file = cfg.workdir.parent / "input" / "params.json"
+    if params_file.exists():
+        params = json.loads(params_file.read_text())
+        preset = params.get("preset")
+    else:
+        preset = None
 
+    if preset == "m3_popc_full":
+        print("\n=== FULL PRESET: EM → NVT → NPT → MD ===")
+        step_grompp_mdrun_em(cfg, nt=args.nt)
+        step_grompp_mdrun_nvt(cfg, nt=args.nt)
+        step_grompp_mdrun_npt(cfg, nt=args.nt)
+        step_grompp_mdrun_md(cfg, nt=args.nt)
+        print("\nFULL PRESET FINISHED.")
+        return
 
     if args.do_em:
         step_grompp_mdrun_em(cfg, nt=args.nt)
