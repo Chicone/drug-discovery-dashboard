@@ -83,9 +83,10 @@ export default function AnalysisPlot({ title = "Plot", plotData, plotMode }) {
 
     return plotData.replicas.map((rep, idx) => {
       const dt = rep.timestep_ps ?? dt_ps;
-      const x = rep.rmsd.map((_, i) =>
-        Number.isFinite(dt) ? (i * dt) / 1000.0 : i
-      );
+      const x = rep.times_ps
+      ? rep.times_ps.map(t => t / 1000.0)
+      : rep.rmsd.map((_, i) => Number.isFinite(dt) ? (i * dt) / 1000.0 : i);
+
 
       return {
         x,
@@ -126,8 +127,8 @@ export default function AnalysisPlot({ title = "Plot", plotData, plotMode }) {
             plot_bgcolor: "#111",
             font: { color: "white" },
             margin: { t: 60, r: 40, b: 80, l: 60 },
-            xaxis: { title: "Time (ns)", showline: true, linecolor: "white" },
-            yaxis: { title: "RMSD (Å)", showline: true, linecolor: "white" },
+            xaxis: { title: { text: "Time (ns)" }, showline: true, linecolor: "white" },
+            yaxis: { title: { text: "RMSD (Å)" }, showline: true, linecolor: "white" },
           }}
           style={{ width: "100%", height: "100%" }}
           config={{ displayModeBar: false }}
