@@ -16,6 +16,7 @@ from backend.services.md_jobs import (
     _md_job_dir,
 )
 from backend.services.md_jobs import run_cgmd_setup_job
+from backend.services.md_helpers import MD_RUNS_DIR
 
 # ------------------------------------------------------
 # Models
@@ -159,6 +160,28 @@ def stop_md_job(job_id: str):
 
     return {"status": "stopped", "job_id": job_id}
 
+@router.get("/md/log_tail")
+def get_log_tail(job_id: str, offset: int = 0):
+    job_dir = MD_RUNS_DIR / job_id
+    log_path = job_dir / "log.txt"
+
+    if not log_path.exists():
+        return {"chunk": "", "offset": offset}
+
+    size = log_path.stat().st_size
+
+    if offset > size:
+        # File was truncated or restarted
+        offset = 0
+
+    with open(log_path, "rb") as f:
+        f.seek(offset)
+        chunk = f.read()
+
+    return {
+        "chunk": chunk.decode(errors="replace"),
+        "offset": offset + len(chunk)
+    }
 
 
 

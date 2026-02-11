@@ -4,7 +4,7 @@ from typing import Optional
 
 
 # Where MD runs are stored
-MD_RUNS_DIR = Path(__file__).resolve().parents[2] / "data" / "md_runs"
+MD_RUNS_DIR = Path(__file__).resolve().parents[1] / "data" / "md_runs"
 
 
 def md_job_dir(job_id: str) -> Path:

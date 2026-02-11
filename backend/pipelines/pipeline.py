@@ -689,21 +689,24 @@ def step_grompp_mdrun_md(cfg: PipelineConfig, nt: int) -> None:
     # Determine the correct starting structure
     # ------------------------------------------------
     start_gro = params.get("start_gro", "npt.gro")
-    start_cpt = params.get("start_cpt")  # optional
+    start_cpt = params.get("start_cpt")
 
     gro_in = workdir / start_gro
     if not gro_in.exists():
         raise FileNotFoundError(f"start_gro '{start_gro}' not found")
 
-    is_first_md_after_npt = (start_gro == "npt.gro")
+    # ------------------------------------------------
+    # Correct continuation logic
+    # ------------------------------------------------
 
-    # Only use checkpoint for continuation-type MD
-    if (start_cpt and not is_first_md_after_npt):
-        cpt_in = workdir / start_cpt
-        if not cpt_in.exists():
-            cpt_in = None
+    md_cpt = workdir / "md.cpt"
+    if md_cpt.exists():
+        # Case 2 or 3 — MD had started before and crashed or continuing
+        cpt_in = md_cpt
     else:
-        cpt_in = None  # DO NOT use the NPT cpt for first MD
+        # No md.cpt exists → first MD after NPT
+        # Do NOT use NPT checkpoint
+        cpt_in = None
 
     # ------------------------------------------------
     # Generate MD TPR (uses md.mdp, NOT npt.mdp)
@@ -724,7 +727,8 @@ def step_grompp_mdrun_md(cfg: PipelineConfig, nt: int) -> None:
         "gmx", "mdrun",
         "-noappend",
         "-ntmpi", "1",
-        "-nt", str(nt),
+        "-nt", str(4),
+        # "-nt", str(nt),
         "-v",
         "-deffnm", cfg.md_deffnm,
     ]
@@ -735,13 +739,37 @@ def step_grompp_mdrun_md(cfg: PipelineConfig, nt: int) -> None:
 
     run(mdrun_cmd, cwd=workdir)
 
-    # ------------------------------------------------
-    # Normalize output file names
-    # ------------------------------------------------
-    gro_final = workdir / f"{cfg.md_deffnm}.gro"
-    gro_part = workdir / f"{cfg.md_deffnm}.part0001.gro"
-    if not gro_final.exists() and gro_part.exists():
-        gro_part.rename(gro_final)
+    # ------------------------------------------------------------
+    # Normalize output names (md.partXXXX.* → md.*)
+    # Always pick the highest part number (latest continuation)
+    # ------------------------------------------------------------
+    import re
+
+    # Find all part files for this MD
+    part_files = list(workdir.glob(f"{cfg.md_deffnm}.part*.xtc"))
+
+    if part_files:
+        # Extract numeric suffix from filenames
+        def part_index(path):
+            m = re.search(r"\.part(\d+)\.", path.name)
+            return int(m.group(1)) if m else -1
+
+        # Pick the highest index → latest continuation
+        latest_part = max(part_files, key=part_index)
+        latest_idx = part_index(latest_part)
+        tag = f".part{latest_idx:04d}"
+
+        suffixes = [".gro", ".log", ".edr", ".cpt", ".xtc"]
+
+        for suf in suffixes:
+            src = workdir / f"{cfg.md_deffnm}{tag}{suf}"
+            dst = workdir / f"{cfg.md_deffnm}{suf}"
+            if src.exists():
+                # overwrite the destination, always choose latest
+                shutil.copy2(src, dst)
+                print(f"[normalize] {src.name} -> {dst.name}")
+    else:
+        print("[normalize] No md.partXXXX.* files found")
 
 def merge_cg_pdbs(out_pdb: Path, *pdbs: Path) -> None:
     """
@@ -1048,8 +1076,30 @@ def main(argv=None) -> None:
             params = json.loads(params_file.read_text())
             md_ns = params.get("md_ns")
 
+        # 1) Write MD parameters (md.mdp with correct nsteps)
         step_write_mdps(cfg, md_ns_override=md_ns)
+
+        # -------------------------------------------------------------
+        # 2) NEW — Always generate system.pdb for visualization (Chimera)
+        # -------------------------------------------------------------
+        # md continuation jobs DO have system.gro in OUT from parent job,
+        # because md_jobs.py copies it into input/system.gro
+        system_gro = cfg.workdir / "system.gro"
+        system_pdb = cfg.workdir / "system.pdb"
+
+        if system_gro.exists():
+            run([
+                "gmx", "editconf",
+                "-f", str(system_gro),
+                "-o", str(system_pdb),
+            ], cwd=cfg.workdir)
+            print("[MD-only] Generated system.pdb for visualization.")
+        else:
+            print("[MD-only] WARNING: system.gro not found, could not create system.pdb.")
+
+        # 3) Continue MD
         step_grompp_mdrun_md(cfg, nt=args.nt)
+
         return
 
 
@@ -1075,6 +1125,18 @@ def main(argv=None) -> None:
     extract_protein_only(cfg.aa_pdb, protein_aa_clean)
 
     cfg = cfg.__class__(**{**cfg.__dict__, "aa_pdb": protein_aa_clean})
+
+    # ===============================================================
+    # SPECIAL CASE: Dimer scenario (placeholder)
+    # ===============================================================
+    params_file = cfg.workdir.parent / "input" / "params.json"
+    if params_file.exists():
+        params = json.loads(params_file.read_text())
+        if params.get("scenario") == "dimer_two_ligands":
+            raise RuntimeError(
+                "Dimer build scenario detected. "
+                "Dimer construction is not implemented yet."
+            )
 
     # ===============================================================
     # 2) Process orthosteric ligand *if provided*

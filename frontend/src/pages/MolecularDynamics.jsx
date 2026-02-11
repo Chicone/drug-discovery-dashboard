@@ -31,8 +31,9 @@ function MolecularDynamics() {
 
   const [jobId, setJobId] = useState(null);
   const [status, setStatus] = useState(null);
-  const [logText, setLogText] = useState("");
+  const logRef = useRef(null);
   const logOffsetRef = useRef(0);
+  //   const [logText, setLogText] = useState("");
   const [files, setFiles] = useState([]);
   const [error, setError] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -96,6 +97,7 @@ function MolecularDynamics() {
         id: "protein_plus_orthosteric_plus_allosteric",
         label: "Protein + orthosteric + allosteric ligand",
       },
+      { id: "dimer_two_ligands", label: "Dimer + 2 orthosteric ligands" },
     ],
     []
   );
@@ -155,11 +157,7 @@ function MolecularDynamics() {
     }
   }, []);
 
-  useEffect(() => {
-    if (logEndRef.current) {
-      logEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [logText]);
+
 
   useEffect(() => {
     try {
@@ -176,7 +174,6 @@ function MolecularDynamics() {
     setSelectedParentJobId(id);
     setJobId(id);
     setStatus("running");
-    setLogText("");
     logOffsetRef.current = 0;
     setFiles([]);
     pollJob(id);
@@ -187,6 +184,23 @@ function MolecularDynamics() {
       throw new Error(`Invalid run preset: ${preset}`);
     }
     return "run_md";
+  }
+
+  function appendLog(chunk) {
+    const el = logRef.current;
+    if (!el || !chunk) return;
+
+    el.textContent += chunk;
+
+    // Optional: keep only last X lines
+    const MAX_LINES = 2000;
+    let lines = el.textContent.split("\n");
+    if (lines.length > MAX_LINES) {
+      lines = lines.slice(lines.length - MAX_LINES);
+      el.textContent = lines.join("\n");
+    }
+
+    el.scrollTop = el.scrollHeight; // auto scroll
   }
 
 
@@ -215,7 +229,6 @@ async function submitJob({ preset, workflow, parentJobId = null }) {
   }
 
   setIsSubmitting(true);
-  setLogText("");
   logOffsetRef.current = 0;
   setFiles([]);
   setJobId(null);
@@ -337,7 +350,7 @@ async function createRunJob() {
           );
 
           if (chunk.length > 0) {
-            setLogText((prev) => prev + chunk);
+            appendLog(chunk);
           }
 
           logOffsetRef.current = newOffset;
@@ -730,24 +743,23 @@ async function createRunJob() {
               <Typography variant="subtitle2" sx={{ mb: 1 }}>
                 Logs
               </Typography>
-                <Box
-                  sx={{
-                    background: "#111",
-                    border: "1px solid #333",
-                    borderRadius: 1,
-                    p: 2,
-                    fontFamily: "monospace",
-                    fontSize: 12,
-                    whiteSpace: "pre-wrap",
-                    maxHeight: 260,
-                    overflowY: "auto",
-                  }}
-                >
-                  {logText || "No logs yet."}
+               <pre
+  ref={logRef}
+  style={{
+    background: "#111",
+    border: "1px solid #333",
+    borderRadius: "6px",
+    padding: "12px",
+    fontFamily: "monospace",
+    fontSize: "12px",
+    whiteSpace: "pre-wrap",
+    maxHeight: "260px",
+    overflowY: "auto",
+    color: "#0f0",
+  }}
+>
+</pre>
 
-                  {/* Auto-scroll anchor */}
-                  <div ref={logEndRef} />
-                </Box>
 
 
 {/* Collapsible Output Files */}

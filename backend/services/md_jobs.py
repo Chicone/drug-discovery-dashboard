@@ -60,11 +60,13 @@ def create_md_job_service(
     This function contains EXACTLY the logic currently in md.py:create_md_job,
     without modifying behavior.
     """
+    print("DEBUG scenario =", scenario)
     try:
         allowed_scenarios = {
             "protein_only",
             "protein_plus_orthosteric",
             "protein_plus_orthosteric_plus_allosteric",
+            "dimer_two_ligands",
         }
         if scenario not in allowed_scenarios:
             return JSONResponse(
@@ -185,9 +187,24 @@ def create_md_job_service(
                     content={"error": "No usable .gro found in parent job"},
                 )
 
+            # NEW: Ensure every MD job has a system.gro for analysis (RMSD, etc.)
+            # ----------------------------------------------------------------------
+            sys_src = parent_out / "system.gro"
+            if sys_src.exists():
+                shutil.copy2(sys_src, input_dir / "system.gro")
+            else:
+                # fallback: clone the chosen start_gro as system.gro
+                fallback_src = parent_out / start_gro
+                shutil.copy2(fallback_src, input_dir / "system.gro")
+
             # Second: find checkpoint (.cpt) — optional
+            # Prefer MD checkpoint first
             candidate_cpts = [
-                "npt.cpt", "md.cpt", "nvt.cpt", "em.cpt",
+                "md.cpt",
+                "md_prev.cpt",  # optional: if you want to support fallback
+                "npt.cpt",
+                "nvt.cpt",
+                "em.cpt",
             ]
 
             for fname in candidate_cpts:
