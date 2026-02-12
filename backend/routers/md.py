@@ -49,6 +49,7 @@ async def create_md_job(
     workflow: str = Form("build_only"),  # "build_only" | "equilibrate" | "full"
     parent_job_id: Optional[str] = Form(None),
     md_ns: Optional[float] = Form(None),
+    nt: int = Form(1),
     orthosteric_ligand: Optional[UploadFile] = File(None),
     allosteric_pose: Optional[UploadFile] = File(None),
 ):
@@ -60,6 +61,7 @@ async def create_md_job(
         workflow,
         parent_job_id,
         md_ns,
+        nt,
         orthosteric_ligand,
         allosteric_pose,
     )

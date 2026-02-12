@@ -29,18 +29,32 @@ def load_ligand_residue(system_gro: Path) -> str:
 
 def compute_ligand_rmsd_single(job_dir: Path, ligand_resname="ORT"):
     system = job_dir / "input" / "system.gro"
-    traj = job_dir / "out" / "md.xtc"
-    # traj = None
-    # for name in ["md_nojump.xtc",
-    #              "md_fit.xtc",
-    #              "md_centered.xtc",
-    #              "md_pbc.xtc",
-    #              "md_unwrapped.xtc",
-    #              "md.xtc"]:
-    #     p = job_dir / "out" / name
-    #     if p.exists() and p.stat().st_size > 0:
-    #         traj = p
-    #         break
+
+    out_dir = job_dir / "out"
+
+    traj = out_dir / "md.xtc"
+
+    if not traj.exists():
+        # Look for continuation parts: md.partXXXX.xtc
+        import re
+
+        part_files = list(out_dir.glob("md.part*.xtc"))
+
+        if not part_files:
+            raise FileNotFoundError(
+                f"No trajectory found in {out_dir} "
+                "(md.xtc or md.partXXXX.xtc)"
+            )
+
+        def part_index(path):
+            m = re.search(r"\.part(\d+)\.xtc", path.name)
+            return int(m.group(1)) if m else -1
+
+        latest_part = max(part_files, key=part_index)
+
+        print(f"[RMSD] Using continuation trajectory: {latest_part.name}")
+
+        traj = latest_part
 
     if not system.exists():
         return {"error": f"Missing file: {system}"}

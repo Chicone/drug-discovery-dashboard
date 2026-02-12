@@ -48,9 +48,12 @@ function MolecularDynamics() {
   const [environment, setEnvironment] = useState("membrane");
   const [lastBuildJobId, setLastBuildJobId] = useState(null);
   const [mdDurationNs, setMdDurationNs] = useState(50);
+  const [numThreads, setNumThreads] = useState(1);
+
   const logEndRef = useRef(null);
 
   const [showFiles, setShowFiles] = useState(false);
+
 
   // Persistent job locking
   const [lockedJobs, setLockedJobs] = useState(() => {
@@ -250,6 +253,7 @@ async function submitJob({ preset, workflow, parentJobId = null }) {
     form.append("environment", environment);
     form.append("workflow", workflow);
     form.append("md_ns", mdDurationNs);
+    form.append("nt", numThreads);
 
     if (parentJobId) {
       form.append("parent_job_id", parentJobId);
@@ -406,304 +410,335 @@ async function createRunJob() {
 
   const canSubmit = !!proteinFile && !isSubmitting;
 
-  return (
-    <Paper
-      sx={{
-        p: 3,
-        background: "#1e1e1e",
-        maxWidth: "100%",
-        overflowX: "hidden",
-        color: "white",
-      }}
-    >
-      <Typography variant="h5" gutterBottom>
-        💫 Molecular Dynamics
-      </Typography>
+return (
+  <Paper
+    sx={{
+      p: 3,
+      background: "#1e1e1e",
+      maxWidth: "100%",
+      overflowX: "hidden",
+      color: "white",
+    }}
+  >
+    <Typography variant="h5" gutterBottom>
+      💫 Molecular Dynamics
+    </Typography>
 
-      <Typography variant="body1" sx={{ mb: 2, color: "#aaa" }}>
-        Build a Martini system, then run equilibration or production presets.
-      </Typography>
+    <Typography variant="body1" sx={{ mb: 2, color: "#aaa" }}>
+      Build a Martini system, then run equilibration or production presets.
+    </Typography>
 
-      <Divider sx={{ borderColor: "#333", mb: 2 }} />
+    <Divider sx={{ borderColor: "#333", mb: 2 }} />
 
-      <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-        {/* Left: Recent jobs */}
-        <Box sx={{ minWidth: { xs: "100%", md: 360 }, maxWidth: 440 }}>
-          <Typography variant="subtitle1" sx={{ mb: 1 }}>
-            Recent MD jobs
-          </Typography>
+    <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
+      {/* Left: Recent jobs */}
+      <Box sx={{ minWidth: { xs: "100%", md: 360 }, maxWidth: 440 }}>
+        <Typography variant="subtitle1" sx={{ mb: 1 }}>
+          Recent MD jobs
+        </Typography>
 
-          <Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: "center" }}>
-            <TextField
-              label="Limit (0 = all)"
-              type="number"
-              size="small"
-              value={historyLimit}
-              onChange={(e) => {
-                const n = Number(e.target.value);
-                if (!Number.isFinite(n)) return;
-                setHistoryLimit(Math.max(0, Math.floor(n)));
-              }}
-              sx={{ width: 160 }}
+        <Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: "center" }}>
+          <TextField
+            label="Limit (0 = all)"
+            type="number"
+            size="small"
+            value={historyLimit}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (!Number.isFinite(n)) return;
+              setHistoryLimit(Math.max(0, Math.floor(n)));
+            }}
+            sx={{ width: 160 }}
+          />
+
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => loadRecentJobs(historyLimit)}
+            disabled={loadingJobs}
+          >
+            Refresh
+          </Button>
+        </Stack>
+
+        <Box
+          sx={{
+            border: "1px solid #333",
+            borderRadius: 1,
+            p: 1,
+            background: "#111",
+            maxHeight: 520,
+            overflowY: "auto",
+          }}
+        >
+          {recentJobs.length === 0 ? (
+            <Typography variant="body2" sx={{ color: "#aaa" }}>
+              No jobs yet.
+            </Typography>
+          ) : (
+            <Stack spacing={1}>
+              {recentJobs.map((j) => {
+                const isActive = j.job_id === selectedParentJobId;
+
+                return (
+                  <Box
+                    key={j.job_id}
+                    sx={{
+                      p: 1,
+                      borderRadius: 1,
+                      background: isActive ? "#2a2a2a" : "#1a1a1a",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {/* Left: job info */}
+                    <Box onClick={() => openJob(j.job_id)}>
+                      <Typography variant="body2" sx={{ color: "#ddd" }}>
+                        {j.status || "?"} | {j.scenario || "md"} |{" "}
+                        {j.preset || "preset"}
+                      </Typography>
+
+                      <Typography
+                        variant="caption"
+                        sx={{ color: "#777", display: "block" }}
+                      >
+                        {j.job_id}
+                      </Typography>
+                    </Box>
+
+                    {/* Right: lock + delete */}
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        sx={{
+                          minWidth: 32,
+                          padding: "2px 6px",
+                          color: lockedJobs.has(j.job_id) ? "#66bb6a" : "#aaa",
+                          borderColor: lockedJobs.has(j.job_id)
+                            ? "#66bb6a"
+                            : "#555",
+                          "&:hover": {
+                            borderColor: lockedJobs.has(j.job_id)
+                              ? "#81c784"
+                              : "#888",
+                          },
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setLockedJobs((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(j.job_id)) next.delete(j.job_id);
+                            else next.add(j.job_id);
+                            return next;
+                          });
+                        }}
+                      >
+                        {lockedJobs.has(j.job_id) ? "🔒" : "🔓"}
+                      </Button>
+
+                      <Button
+                        size="small"
+                        color="error"
+                        disabled={lockedJobs.has(j.job_id) === true}
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (lockedJobs.has(j.job_id)) return;
+                          await fetch(`/api/md/jobs/${j.job_id}`, {
+                            method: "DELETE",
+                          });
+                          loadRecentJobs(historyLimit);
+                        }}
+                      >
+                        ✕
+                      </Button>
+                    </Stack>
+                  </Box>
+                );
+              })}
+            </Stack>
+          )}
+        </Box>
+      </Box>
+
+      {/* Right: Build and Run */}
+      <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Stack spacing={2}>
+          {/* Scenario */}
+          <TextField
+            select
+            label="Scenario"
+            value={scenario}
+            onChange={(e) => setScenario(e.target.value)}
+            size="small"
+            sx={{ maxWidth: 520 }}
+          >
+            {scenarios.map((s) => (
+              <MenuItem key={s.id} value={s.id}>
+                {s.label}
+              </MenuItem>
+            ))}
+          </TextField>
+
+          {/* Buttons row */}
+          <Stack
+            direction="row"
+            spacing={2}
+            alignItems="center"
+            sx={{ flexWrap: "wrap" }}
+          >
+            <Button
+              variant="contained"
+              color="secondary"
+              onClick={() => proteinInputRef.current?.click()}
+              sx={{ minWidth: 110 }}
+            >
+              PDB
+            </Button>
+
+            <Button
+              variant="outlined"
+              color="secondary"
+              onClick={() => orthostericInputRef.current?.click()}
+              disabled={scenario === "protein_only"}
+              sx={{ minWidth: 110 }}
+            >
+              Ortho
+            </Button>
+
+            <Button
+              variant="outlined"
+              color="secondary"
+              onClick={() => allostericInputRef.current?.click()}
+              disabled={scenario !== "protein_plus_orthosteric_plus_allosteric"}
+              sx={{ minWidth: 110 }}
+            >
+              Allo
+            </Button>
+
+            <input
+              ref={proteinInputRef}
+              type="file"
+              accept=".pdb,.ent"
+              style={{ display: "none" }}
+              onChange={onPickProtein}
             />
 
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={() => loadRecentJobs(historyLimit)}
-              disabled={loadingJobs}
-            >
-              Refresh
-            </Button>
+            <input
+              ref={orthostericInputRef}
+              type="file"
+              accept=".pdb,.sdf,.mol2,.pdbqt,.smi,.smiles,.txt"
+              style={{ display: "none" }}
+              onChange={onPickOrthosteric}
+            />
+
+            <input
+              ref={allostericInputRef}
+              type="file"
+              accept=".pdb,.pdbqt,.sdf,.mol2,.smi,.smiles,.txt"
+              style={{ display: "none" }}
+              onChange={onPickAllostericPose}
+            />
           </Stack>
 
-          <Box
-            sx={{
-              border: "1px solid #333",
-              borderRadius: 1,
-              p: 1,
-              background: "#111",
-              maxHeight: 520,
-              overflowY: "auto",
-            }}
-          >
-            {recentJobs.length === 0 ? (
-              <Typography variant="body2" sx={{ color: "#aaa" }}>
-                No jobs yet.
+          {/* Selected files under buttons */}
+          <Box>
+            {proteinFile && (
+              <Typography variant="caption" sx={{ color: "#aaa", display: "block" }}>
+                PDB: {proteinFile.name}
               </Typography>
-            ) : (
-              <Stack spacing={1}>
-                {recentJobs.map((j) => {
-                      const isActive = j.job_id === selectedParentJobId;
-
-                      return (
-                        <Box
-                          key={j.job_id}
-                          sx={{
-                            p: 1,
-                            borderRadius: 1,
-                            background: isActive ? "#2a2a2a" : "#1a1a1a",
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            cursor: "pointer",
-                          }}
-                        >
-                          {/* Left: job info */}
-                          <Box onClick={() => openJob(j.job_id)}>
-                            <Typography variant="body2" sx={{ color: "#ddd" }}>
-                              {j.status || "?"} | {j.scenario || "md"} | {j.preset || "preset"}
-                            </Typography>
-
-                            <Typography variant="caption" sx={{ color: "#777", display: "block" }}>
-                              {j.job_id}
-                            </Typography>
-                          </Box>
-
-{/* Right section: lock + delete */}
-<Stack direction="row" spacing={1} alignItems="center">
-  {/* Lock toggle button */}
-  <Button
-    size="small"
-    variant="outlined"
-    sx={{
-      minWidth: 32,
-      padding: "2px 6px",
-      color: lockedJobs.has(j.job_id) ? "#66bb6a" : "#aaa",
-      borderColor: lockedJobs.has(j.job_id) ? "#66bb6a" : "#555",
-      "&:hover": {
-        borderColor: lockedJobs.has(j.job_id) ? "#81c784" : "#888",
-      },
-    }}
-    onClick={(e) => {
-      e.stopPropagation();
-      setLockedJobs(prev => {
-        const next = new Set(prev);
-        if (next.has(j.job_id)) next.delete(j.job_id);
-        else next.add(j.job_id);
-        return next;
-      });
-    }}
-
-  >
-    {lockedJobs.has(j.job_id) ? "🔒" : "🔓"}
-  </Button>
-
-  {/* Delete button (disabled if locked) */}
-  <Button
-    size="small"
-    color="error"
-    disabled={lockedJobs.has(j.job_id) === true}
-    onClick={async (e) => {
-      e.stopPropagation();
-      if (lockedJobs.has(j.job_id)) return; // extra safety
-      await fetch(`/api/md/jobs/${j.job_id}`, { method: "DELETE" });
-      loadRecentJobs(historyLimit);
-    }}
-  >
-    ✕
-  </Button>
-</Stack>
-
-                        </Box>
-                      );
-                    })}
-              </Stack>
+            )}
+            {orthostericFile && (
+              <Typography variant="caption" sx={{ color: "#aaa", display: "block" }}>
+                Ortho: {orthostericFile.name}
+              </Typography>
+            )}
+            {allostericPoseFile && (
+              <Typography variant="caption" sx={{ color: "#aaa", display: "block" }}>
+                Allo: {allostericPoseFile.name}
+              </Typography>
             )}
           </Box>
-        </Box>
 
-        {/* Right: Build and Run */}
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Stack spacing={2}>
-            {/* Protein */}
-            <Stack direction="row" spacing={2} alignItems="center">
-              <Button
-                variant="contained"
-                color="secondary"
-                onClick={() => proteinInputRef.current?.click()}
-              >
-                Select PDB
-              </Button>
-              <input
-                ref={proteinInputRef}
-                type="file"
-                accept=".pdb,.ent"
-                style={{ display: "none" }}
-                onChange={onPickProtein}
-              />
-              <Typography variant="body2" sx={{ color: "#aaa" }}>
-                {proteinFile ? proteinFile.name : "No file selected"}
-              </Typography>
-            </Stack>
+          {/* Environment */}
+          <TextField
+            select
+            label="Environment"
+            value={environment}
+            onChange={(e) => setEnvironment(e.target.value)}
+            size="small"
+            sx={{ maxWidth: 360 }}
+          >
+            <MenuItem value="membrane">
+              Membrane + solvent (recommended for GPCR)
+            </MenuItem>
+            <MenuItem value="solvated_box">Solvated box (no membrane)</MenuItem>
+          </TextField>
 
-            {/* Scenario */}
-            <TextField
-              select
-              label="Scenario"
-              value={scenario}
-              onChange={(e) => setScenario(e.target.value)}
-              size="small"
-              sx={{ maxWidth: 520 }}
-            >
-              {scenarios.map((s) => (
-                <MenuItem key={s.id} value={s.id}>
-                  {s.label}
-                </MenuItem>
-              ))}
-            </TextField>
+          <Divider sx={{ borderColor: "#333" }} />
 
-            {/* Orthosteric ligand */}
-            <Stack direction="row" spacing={2} alignItems="center">
-              <Button
-                variant="outlined"
-                color="secondary"
-                onClick={() => orthostericInputRef.current?.click()}
-                disabled={scenario === "protein_only"}
-              >
-                Select orthosteric ligand
-              </Button>
-              <input
-                ref={orthostericInputRef}
-                type="file"
-                accept=".pdb,.sdf,.mol2,.pdbqt,.smi,.smiles,.txt"
-                style={{ display: "none" }}
-                onChange={onPickOrthosteric}
-              />
-              <Typography variant="body2" sx={{ color: "#aaa" }}>
-                {orthostericFile
-                  ? orthostericFile.name
-                  : "From a docked complex to extract orthosteric pose"}
-              </Typography>
-            </Stack>
+          {/* Build system */}
+          <Typography variant="subtitle1">Build system</Typography>
 
-            {/* Allosteric pose */}
-            <Stack direction="row" spacing={2} alignItems="center">
-              <Button
-                variant="outlined"
-                color="secondary"
-                onClick={() => allostericInputRef.current?.click()}
-                disabled={scenario !== "protein_plus_orthosteric_plus_allosteric"}
-              >
-                Select allosteric ligand
-              </Button>
-              <input
-                ref={allostericInputRef}
-                type="file"
-                accept=".pdb,.pdbqt,.sdf,.mol2,.smi,.smiles,.txt"
-                style={{ display: "none" }}
-                onChange={onPickAllostericPose}
-              />
-              <Typography variant="body2" sx={{ color: "#aaa" }}>
-                {allostericPoseFile
-                  ? allostericPoseFile.name
-                  : "From a docked complex to extract allosteric pose"}
-              </Typography>
-            </Stack>
-
-            {/* Environment */}
-            <TextField
-              select
-              label="Environment"
-              value={environment}
-              onChange={(e) => setEnvironment(e.target.value)}
-              size="small"
-              sx={{ maxWidth: 360 }}
-            >
-              <MenuItem value="membrane">
-                Membrane + solvent (recommended for GPCR)
+          <TextField
+            select
+            label="Build preset"
+            value={presetBuild}
+            onChange={(e) => setPresetBuild(e.target.value)}
+            size="small"
+            sx={{ maxWidth: 520 }}
+          >
+            {buildPresets.map((p) => (
+              <MenuItem key={p.id} value={p.id}>
+                {p.label}
               </MenuItem>
-              <MenuItem value="solvated_box">Solvated box (no membrane)</MenuItem>
-            </TextField>
+            ))}
+          </TextField>
 
-            <Divider sx={{ borderColor: "#333" }} />
+          <Button
+            variant="outlined"
+            onClick={createBuildJob}
+            disabled={!canSubmit}
+            sx={{ maxWidth: 200 }}
+          >
+            Build system
+          </Button>
 
-            {/* Build system */}
-            <Typography variant="subtitle1">Build system</Typography>
+          <Divider sx={{ borderColor: "#333" }} />
+
+          {/* Run MD */}
+          <Typography variant="subtitle1">Run MD</Typography>
+
+          <Stack direction="row" spacing={2} alignItems="center">
             <TextField
-              select
-              label="Build preset"
-              value={presetBuild}
-              onChange={(e) => setPresetBuild(e.target.value)}
-              size="small"
-              sx={{ maxWidth: 520 }}
-            >
-              {buildPresets.map((p) => (
-                <MenuItem key={p.id} value={p.id}>
-                  {p.label}
-                </MenuItem>
-              ))}
-            </TextField>
-
-            <Button
-              variant="outlined"
-              onClick={createBuildJob}
-              disabled={!canSubmit}
-              sx={{ maxWidth: 220 }}
-            >
-              Build system
-            </Button>
-
-            <Divider sx={{ borderColor: "#333" }} />
-
-            {/* Run MD */}
-            <Typography variant="subtitle1">Run MD</Typography>
-            <TextField
-              label="MD duration (ns)"
+              label="Duration (ns)"
               type="number"
               value={mdDurationNs}
               onChange={(e) => setMdDurationNs(Number(e.target.value))}
               size="small"
-              sx={{ maxWidth: 220 }}
+              sx={{ width: 110 }}
               inputProps={{ min: 1, step: 10 }}
             />
+
+            <TextField
+              label="CPUs"
+              type="number"
+              value={numThreads}
+              onChange={(e) => setNumThreads(Number(e.target.value))}
+              size="small"
+              sx={{ width: 90 }}
+              inputProps={{ min: 1, step: 1 }}
+            />
+
             <TextField
               select
-              label="Run preset"
+              label="Preset"
               value={presetRun}
               onChange={(e) => setPresetRun(e.target.value)}
               size="small"
-              sx={{ maxWidth: 520 }}
+              sx={{ minWidth: 290 }}
             >
               {runPresets.map((p) => (
                 <MenuItem key={p.id} value={p.id}>
@@ -711,132 +746,78 @@ async function createRunJob() {
                 </MenuItem>
               ))}
             </TextField>
-
-<Stack direction="row" spacing={2}>
-  <Button
-    variant="outlined"
-    onClick={createRunJob}
-    disabled={!canSubmit || status === "running"}
-  >
-    Run MD
-  </Button>
-
-  <Button
-    variant="outlined"
-    color="error"
-    onClick={stopRunJob}
-    disabled={!jobId || status !== "running"}
-  >
-    Stop MD
-  </Button>
-
-  {jobId && status === "done" && (
-    <Button
-      variant="contained"
-      color="primary"
-      href={`/api/md/jobs/${jobId}/download`}
-    >
-      Download results
-    </Button>
-  )}
-</Stack>
-
-
-            {error && (
-              <Typography variant="body2" sx={{ color: "#ff8080" }}>
-                {error}
-              </Typography>
-            )}
-
-            <Divider sx={{ borderColor: "#333" }} />
-
-            <Box>
-              <Typography variant="body2" sx={{ color: "#aaa", mb: 1 }}>
-                Status: {status || "idle"} {jobId ? `(job: ${jobId})` : ""}
-              </Typography>
-
-              <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                Logs
-              </Typography>
-               <pre
-  ref={logRef}
-  style={{
-    background: "#111",
-    border: "1px solid #333",
-    borderRadius: "6px",
-    padding: "12px",
-    fontFamily: "monospace",
-    fontSize: "12px",
-    whiteSpace: "pre-wrap",
-    maxHeight: "260px",
-    overflowY: "auto",
-    color: "#0f0",
-  }}
->
-</pre>
-
-
-
-{/* Collapsible Output Files */}
-<Box sx={{ mt: 2 }}>
-  <Box
-    onClick={() => setShowFiles((v) => !v)}
-    sx={{
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      cursor: "pointer",
-      userSelect: "none",
-      background: "#111",
-      border: "1px solid #333",
-      borderRadius: 1,
-      px: 2,
-      py: 1,
-    }}
-  >
-    <Typography variant="subtitle2">
-      Output files
-    </Typography>
-    <Typography sx={{ fontSize: 18 }}>
-      {showFiles ? "▾" : "▸"}
-    </Typography>
-  </Box>
-
-  {showFiles && (
-    <Box
-      sx={{
-        mt: 1,
-        color: "#aaa",
-        fontSize: 13,
-        background: "#111",
-        border: "1px solid #333",
-        borderRadius: 1,
-        p: 2,
-        maxHeight: 250,
-        overflowY: "auto",
-      }}
-    >
-      {files.length === 0 ? (
-        <div>No output files yet.</div>
-      ) : (
-        <ul style={{ margin: 0, paddingLeft: "20px" }}>
-          {files.map((f) => (
-            <li key={f.name}>
-              {f.name} {f.size ? `(${f.size})` : ""}
-            </li>
-          ))}
-        </ul>
-      )}
-    </Box>
-  )}
-</Box>
-
-            </Box>
           </Stack>
-        </Box>
-      </Stack>
-    </Paper>
-  );
+
+          <Stack direction="row" spacing={2}>
+            <Button
+              variant="outlined"
+              onClick={createRunJob}
+              disabled={!canSubmit || status === "running"}
+              sx={{ minWidth: 110 }}
+            >
+              Run MD
+            </Button>
+
+            <Button
+              variant="outlined"
+              color="error"
+              onClick={stopRunJob}
+              disabled={!jobId || status !== "running"}
+              sx={{ minWidth: 110 }}
+            >
+              Stop
+            </Button>
+
+            {jobId && status === "done" && (
+              <Button
+                variant="contained"
+                color="primary"
+                href={`/api/md/jobs/${jobId}/download`}
+              >
+                Download
+              </Button>
+            )}
+          </Stack>
+
+          {error && (
+            <Typography variant="body2" sx={{ color: "#ff8080" }}>
+              {error}
+            </Typography>
+          )}
+
+          <Divider sx={{ borderColor: "#333" }} />
+
+          {/* Logs */}
+          <Box>
+            <Typography variant="body2" sx={{ color: "#aaa", mb: 1 }}>
+              Status: {status || "idle"} {jobId ? `(job: ${jobId})` : ""}
+            </Typography>
+
+            <Typography variant="subtitle2" sx={{ mb: 1 }}>
+              Logs
+            </Typography>
+
+            <pre
+              ref={logRef}
+              style={{
+                background: "#111",
+                border: "1px solid #333",
+                borderRadius: "6px",
+                padding: "12px",
+                fontFamily: "monospace",
+                fontSize: "12px",
+                whiteSpace: "pre-wrap",
+                maxHeight: "260px",
+                overflowY: "auto",
+                color: "#0f0",
+              }}
+            />
+          </Box>
+        </Stack>
+      </Box>
+    </Stack>
+  </Paper>
+);
 }
 
 export default MolecularDynamics;

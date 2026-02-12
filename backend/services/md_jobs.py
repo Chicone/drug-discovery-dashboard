@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import shutil
-import subprocess
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -13,11 +12,11 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 from fastapi.responses import JSONResponse
 
-import os
 import sys
 import threading
-import signal
 from backend.services.md_helpers import MD_RUNS_DIR
+
+from backend.pipelines.runtime import RUNNING_JOBS
 
 
 from backend.services.md_helpers import (
@@ -54,6 +53,7 @@ def create_md_job_service(
     workflow,
     parent_job_id,
     md_ns,
+    nt,
     orthosteric_ligand,
     allosteric_pose,
 ):
@@ -333,7 +333,7 @@ def create_md_job_service(
             "start_gro": start_gro,
             "start_cpt": start_cpt,
             "gmx": {
-                "nt": 1,
+                "nt": int(nt),
                 "ntmpi": 1
             },
             "files": {
@@ -575,6 +575,7 @@ def _launch_md_local(job_dir: Path) -> None:
     params = json.loads(params_path.read_text(encoding="utf-8"))
 
     workflow = params.get("workflow", "full")
+
     module = PIPELINE_BY_WORKFLOW.get(workflow)
     if module is None:
         raise RuntimeError(f"Unknown workflow: {workflow}")
@@ -589,6 +590,10 @@ def _launch_md_local(job_dir: Path) -> None:
         "--workdir", str(job_dir / "out"),
         "--aa_pdb", str(input_dir / params["files"]["protein_pdb"]),
     ]
+
+    nt = params.get("gmx", {}).get("nt", 1)
+    cmd += ["--nt", str(nt)]
+
     orth = params["files"].get("orthosteric_ligand")
     if orth:
         cmd += ["--orthosteric_pdb", str(input_dir / orth)]
@@ -647,12 +652,20 @@ def _append_log(job_dir: Path, line: str) -> None:
     with open(job_dir / "log.txt", "a", encoding="utf-8") as f:
         f.write(line)
 
+from collections import deque
+import os
+import signal
+import subprocess
+from pathlib import Path
+
 def _run_and_stream(
     job_dir: Path,
     cmd: list[str],
     cwd: Path,
     env=None,
 ) -> int:
+
+    job_id = job_dir.name
 
     _append_log(job_dir, "\n$ " + " ".join(cmd) + "\n")
 
@@ -665,34 +678,89 @@ def _run_and_stream(
         text=True,
         bufsize=1,
         universal_newlines=True,
-        preexec_fn=os.setsid,  # <--- NEW
+        preexec_fn=os.setsid,  # start new process group
     )
 
+    RUNNING_JOBS[job_id] = proc
     _write_json(job_dir / "pid.json", {"pid": proc.pid})
 
+    # Rolling buffer of recent lines
+    last_lines = deque(maxlen=300)
+
+    # Diagnostics trackers
+    last_energy = None
+    last_temp = None
+    last_pressure = None
+    last_step_line = None
+
+    catastrophic = False
+    trigger_line = None
+
     assert proc.stdout is not None
+
     for line in iter(proc.stdout.readline, ""):
 
-        # --- NEW: detect catastrophic LINCS / constraint failures ---
+        last_lines.append(line)
+
+        # Track useful diagnostic info
+        if "Epot" in line:
+            last_energy = line
+        if "Temperature" in line:
+            last_temp = line
+        if "Pressure" in line:
+            last_pressure = line
+        if "Step" in line:
+            last_step_line = line
+
+        lower = line.lower()
+
+        # --- Catastrophic detectors ---
         if (
-            "LINCS WARNING" in line
-            or "constraint error" in line.lower()
-            or "bond length" in line.lower()
-            or "constraint" in line.lower() and "violated" in line.lower()
+                "lincs warning" in lower
+                or "constraint error" in lower
+                or "bond length" in lower
+                or ("constraint" in lower and "violated" in lower)
+                or "pressure scaling more than" in lower
+                or re.search(r"\b(nan|inf)\b", lower)
+                or "can not fix pbc" in lower
         ):
-            _append_log(job_dir, "\n### ERROR: Constraint failure detected. Stopping MD early.\n")
-            # Kill the entire GROMACS process group
+            catastrophic = True
+            trigger_line = line
+
+        # Write line to log
+        _append_log(job_dir, line)
+
+        # If catastrophic event detected → stop immediately
+        if catastrophic:
+            _append_log(job_dir, "\n\n### FATAL MD ERROR DETECTED ###\n")
+            _append_log(job_dir, f"Trigger line:\n{trigger_line}\n")
+
+            if last_step_line:
+                _append_log(job_dir, f"\nLast step line:\n{last_step_line}\n")
+            if last_energy:
+                _append_log(job_dir, f"\nLast energy line:\n{last_energy}\n")
+            if last_temp:
+                _append_log(job_dir, f"\nLast temperature line:\n{last_temp}\n")
+            if last_pressure:
+                _append_log(job_dir, f"\nLast pressure line:\n{last_pressure}\n")
+
+            _append_log(job_dir, "\n--- Last 300 log lines before crash ---\n")
+            _append_log(job_dir, "".join(last_lines))
+            _append_log(job_dir, "\nStopping MD process group...\n")
+
             try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
             except ProcessLookupError:
                 pass
 
+            RUNNING_JOBS.pop(job_id, None)
             return 1
-        # ------------------------------------------------------------
 
-        _append_log(job_dir, line)
+    # Normal termination
+    code = proc.wait()
+    RUNNING_JOBS.pop(job_id, None)
+    return code
 
-    return proc.wait()
 
 
 # ============================================================
@@ -701,12 +769,6 @@ def _run_and_stream(
 
 import json
 def stop_job(job_id: str):
-    """
-    Stop a running local MD job using its stored PID.
-    Returns:
-        True  -> job stopped
-        False -> no running process found
-    """
     job_dir = _md_job_dir(job_id)
     pid_file = job_dir / "pid.json"
 
@@ -719,14 +781,15 @@ def stop_job(job_id: str):
     except Exception:
         return False
 
-    # Try stopping the process
     try:
-        os.kill(pid, signal.SIGTERM)
+        # Kill the whole process group
+        os.killpg(os.getpgid(pid), signal.SIGTERM)
     except ProcessLookupError:
-        pass  # process already dead, still mark as stopped
+        pass
 
     _write_json(job_dir / "status.json", {"status": "stopped"})
     return True
+
 
 
 def delete_job(job_id: str) -> bool:
