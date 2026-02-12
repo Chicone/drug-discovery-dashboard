@@ -6,8 +6,8 @@
 define                  =
 
 integrator              = md
-dt                      = 0.0025      ; ultra-safe: 2 fs
-nsteps                  = 100000     ; 0.25 ns (adjust as needed)
+dt                      = 0.01      ; ultra-safe: 2 fs
+nsteps                  = 25000     ; 0.25 ns (adjust as needed)
 
 ; Velocity generation (replica diversification)
 gen_vel  = yes
