@@ -207,6 +207,137 @@ def patch_small_beads(itp_path: Path):
     print(f"[patch] Applied {changed} SC5→TC5 replacements to {itp_path}")
 
 
+from pathlib import Path
+
+def patch_ligand_20pc(itp_path: Path):
+    """
+    Reduce ONLY dihedral force constants to 10% of original.
+    Do NOT modify angles.
+    Do NOT modify equilibrium angles.
+    """
+
+    if not itp_path.exists():
+        raise FileNotFoundError(f"Cannot patch missing ITP: {itp_path}")
+
+    lines = itp_path.read_text().splitlines()
+    new_lines = []
+
+    section = None
+
+    for line in lines:
+        stripped = line.strip()
+
+        if stripped.startswith("["):
+            section = stripped.lower()
+
+        # --- Dihedrals only ---
+        if section == "[dihedrals]" and stripped and not stripped.startswith(";"):
+            parts = re.split(r"\s+", stripped)
+            if len(parts) >= 7:
+                try:
+                    k = float(parts[6])
+                    parts[6] = f"{k * 0.2:.2f}"  # 70% softer
+                    line = "   " + "   ".join(parts)
+                except ValueError:
+                    pass
+
+        new_lines.append(line)
+
+    itp_path.write_text("\n".join(new_lines) + "\n")
+    print("[patch] Reduced dihedral force constants to 10%")
+
+import re
+from pathlib import Path
+
+
+def patch_ligand(
+    itp_path: Path,
+    *,
+    bond_factor: float = 1.0,
+    angle_factor: float = 1.0,
+    dihedral_factor: float = 0.15,
+    bond_k_min: float = 0.0,
+    angle_k_min: float = 0.0,
+    dihedral_k_min: float = 50.0,
+) -> None:
+    """
+    Independently scale bonded force constants in:
+
+        - [ bonds ]     (k column 5)
+        - [ angles ]    (k column 6)
+        - [ dihedrals ] (k column 7)
+
+    Only scales force constants >= corresponding *_k_min.
+    """
+
+    if not itp_path.exists():
+        raise FileNotFoundError(f"Cannot patch missing ITP: {itp_path}")
+
+    lines = itp_path.read_text().splitlines()
+    out = []
+    section = None
+    changed_b = 0
+    changed_a = 0
+    changed_d = 0
+
+    for line in lines:
+        stripped = line.strip()
+
+        if stripped.startswith("["):
+            section = stripped.lower()
+
+        if not stripped or stripped.startswith(";"):
+            out.append(line)
+            continue
+
+        parts = re.split(r"\s+", stripped)
+
+        try:
+            # -------------------------
+            # BONDS
+            # i j func r0 k
+            # -------------------------
+            if section == "[bonds]" and len(parts) >= 5:
+                k_old = float(parts[4])
+                if k_old >= bond_k_min and bond_factor != 1.0:
+                    parts[4] = f"{k_old * bond_factor:.2f}"
+                    line = "   " + "   ".join(parts)
+                    changed_b += 1
+
+            # -------------------------
+            # ANGLES
+            # i j k func theta0 k
+            # -------------------------
+            elif section == "[angles]" and len(parts) >= 6:
+                k_old = float(parts[5])
+                if k_old >= angle_k_min and angle_factor != 1.0:
+                    parts[5] = f"{k_old * angle_factor:.2f}"
+                    line = "   " + "   ".join(parts)
+                    changed_a += 1
+
+            # -------------------------
+            # DIHEDRALS
+            # i j k l func phi0 k mult
+            # -------------------------
+            elif section == "[dihedrals]" and len(parts) >= 7:
+                k_old = float(parts[6])
+                if k_old >= dihedral_k_min and dihedral_factor != 1.0:
+                    parts[6] = f"{k_old * dihedral_factor:.2f}"
+                    line = "   " + "   ".join(parts)
+                    changed_d += 1
+
+        except ValueError:
+            pass
+
+        out.append(line)
+
+    itp_path.write_text("\n".join(out) + "\n")
+
+    print(
+        f"[patch] Bonds: {changed_b}, "
+        f"Angles: {changed_a}, "
+        f"Dihedrals: {changed_d}"
+    )
 
 
 # ------------------------------ Steps --------------------------------
@@ -277,8 +408,8 @@ def step_insane(cfg: PipelineConfig) -> None:
         "-dm",
         "0",
         "-box",
-        # "15.0,15.0,17.0",
-        "10.0,10.0,13.0",
+        "12.0,12.0,15.0",
+        # "10.0,10.0,13.0",
     ]
     run(cmd, cwd=cfg.workdir)
 
@@ -461,8 +592,24 @@ def step_fix_ions(cfg: PipelineConfig) -> None:
 
 def step_write_mdps(cfg: PipelineConfig, md_ns_override: Optional[float] = None) -> None:
     print("\n=== 4) WRITE MDP FILES ===")
+    print("[DEBUG] md_ns_override =", md_ns_override)
 
-    template_dir = MDP_DIR
+    # -------------------------------------------------
+    # Select MDP template set based on scenario
+    # -------------------------------------------------
+    params_file = cfg.workdir.parent / "input" / "params.json"
+
+    scenario = None
+    if params_file.exists():
+        params = json.loads(params_file.read_text())
+        scenario = params.get("scenario")
+
+    if scenario == "protein_only":
+        template_dir = MDP_DIR / "protein_only"
+        print("[mdp] Using protein_only MDP templates")
+    else:
+        template_dir = MDP_DIR / "full"
+        print("[mdp] Using full-system MDP templates")
 
     def cp(name, out_path):
         src = template_dir / name
@@ -688,7 +835,11 @@ def step_grompp_mdrun_md(cfg: PipelineConfig, nt: int) -> None:
     # ------------------------------------------------
     # Determine the correct starting structure
     # ------------------------------------------------
-    start_gro = params.get("start_gro", "npt.gro")
+    start_gro = params.get("start_gro")
+    if not start_gro:
+        start_gro = "npt.gro"
+
+    # start_gro = params.get("start_gro", "npt.gro")
     start_cpt = params.get("start_cpt")
 
     gro_in = workdir / start_gro
@@ -727,7 +878,6 @@ def step_grompp_mdrun_md(cfg: PipelineConfig, nt: int) -> None:
         "gmx", "mdrun",
         "-noappend",
         "-ntmpi", "1",
-        # "-nt", str(4),
         "-nt", str(nt),
         "-v",
         "-deffnm", cfg.md_deffnm,
@@ -1148,6 +1298,8 @@ def main(argv=None) -> None:
 
     # CACHE CHECK
     hit, cfg, cache_dir = cache_check_before_martinize(cfg, args, CG_CACHE)
+
+
     SKIP_LIG = hit  # skip ligand build if cache hit
     args.skip_martinize = hit
 
@@ -1188,7 +1340,8 @@ def main(argv=None) -> None:
             itp_out=orth_itp,
         )
 
-        patch_small_beads(orth_itp)
+        # patch_small_beads(orth_itp)
+        # patch_ligand(orth_itp, factor=0.0, k_min=10)
 
         # Combine protein + ligand into cg_complex.pdb
         cg_complex = cfg.workdir / "cg_complex.pdb"
@@ -1205,12 +1358,26 @@ def main(argv=None) -> None:
         cache_save_after_martinize(cfg, cache_dir)
 
     elif args.orthosteric_pdb and SKIP_LIG:
-        # CACHE HIT → use restored ligand
+        orth_itp = cfg.workdir / "Orthosteric.itp"
+
+        if orth_itp.exists():
+            patch_ligand(
+                orth_itp,
+                bond_factor=1.0,
+                angle_factor=1.0,
+                dihedral_factor=0.5,
+                bond_k_min=50,
+                angle_k_min=0,
+                dihedral_k_min=0,
+            )
+            print("[CACHE] Patched Orthosteric.itp from cache.")
+
         cfg = cfg.__class__(**{
             **cfg.__dict__,
-            "orth_itp": cfg.workdir / "Orthosteric.itp",
+            "orth_itp": orth_itp,
             "cg_pdb": cfg.workdir / "cg_complex.pdb",
         })
+
 
     elif not args.orthosteric_pdb:
         # No ligand in this project
@@ -1233,7 +1400,7 @@ def main(argv=None) -> None:
 
     if not args.skip_mdp_write:
         # Load MD duration override
-        params_file = cfg.workdir / "input" / "params.json"
+        params_file = cfg.workdir.parent / "input" / "params.json"
         md_ns = None
         if params_file.exists():
             params = json.loads(params_file.read_text())
