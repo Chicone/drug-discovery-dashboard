@@ -1,12 +1,13 @@
-; MARTINI 3 — NPT Equilibration (GPCR-SAFE)
+; MARTINI 3 — PRODUCTION RUN (GPCR)
 integrator          = md
-dt                  = 0.0025
-nsteps              = 400000      ; 1 ns (good for membrane relaxation)
+dt                  = 0.01
+nsteps              = 10000000     ; 1.0 μs (adjust as needed)
 
-gen_vel  = yes
+; Velocity generation (replica diversification)
+gen_vel             = no
 
-; Position restraints remain ON
-;define              = -DPOSRES
+; *** NO POSITION RESTRAINTS ***
+define              =
 
 ; Output control
 nstxout             = 0
@@ -14,6 +15,7 @@ nstvout             = 0
 nstfout             = 0
 nstenergy           = 5000
 nstlog              = 5000
+nstxout-compressed  = 5000
 
 ; Neighbour searching
 cutoff-scheme       = Verlet
@@ -26,23 +28,25 @@ rcoulomb            = 1.1
 coulomb-type        = reaction-field
 epsilon_rf          = 15
 
-; Temperature coupling
+; Temperature coupling — separate groups
 tcoupl              = v-rescale
 tc-grps             = Protein ORT POPC W ION
 tau-t               = 1.0 1.0 1.0 1.0 1.0
 ref-t               = 310 310 310 310 310
 
-; Pressure coupling (semi-isotropic)
-pcoupl              = berendsen
+; Pressure coupling — production quality
+pcoupl              = c-rescale          ; Better ensemble than Berendsen
 pcoupltype          = semiisotropic
 tau-p               = 12.0
 ref-p               = 1.0 1.0
 compressibility     = 3e-4 3e-4
-refcoord_scaling = all
 
-; Box & PBC
+; No restraint scaling required
+refcoord_scaling    = all
+
 pbc                 = xyz
-
-; Constraints (Martini: none)
 constraints         = none
+lincs_order = 8
+lincs_iter  = 1
+
 
