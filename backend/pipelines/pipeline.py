@@ -392,24 +392,18 @@ def step_insane(cfg: PipelineConfig) -> None:
 
     cmd = [
         "insane",
-        "-f",
-        str(cfg.cg_pdb),
-        "-o",
-        str(cfg.system_gro),
-        "-p",
-        str(cfg.system_top),
-        "-l",
-        "POPC",
-        "-sol",
-        "W",
-        "-salt",
-        "0.15",
+        "-f", str(cfg.cg_pdb),
+        "-o", str(cfg.system_gro),
+        "-p", str(cfg.system_top),
+        "-l", "POPC",
+        "-sol", "W",
+        "-salt", "0.15",
         "-center",
-        "-dm",
-        "0",
-        "-box",
-        "12.0,12.0,15.0",
-        # "10.0,10.0,13.0",
+        # "-dm",  "0",
+        "-ring",
+        "-d", "1.2",
+        "-box", "14.0,14.0,20.0",
+         # "-box","10.0,10.0,13.0",
     ]
     run(cmd, cwd=cfg.workdir)
 
@@ -664,16 +658,11 @@ def step_grompp_mdrun_em(cfg: PipelineConfig, nt: int) -> None:
         [
             "gmx",
             "grompp",
-            "-f",
-            str(cfg.em_mdp),
-            "-c",
-            str(cfg.system_gro),
-            "-p",
-            str(cfg.system_top),
-            "-o",
-            str(cfg.em_tpr),
-            "-maxwarn",
-            "1",
+            "-f", str(cfg.em_mdp),
+            "-c", str(cfg.system_gro),
+            "-p", str(cfg.system_top),
+            "-o", str(cfg.em_tpr),
+            "-maxwarn", "1",
         ],
         cwd=cfg.workdir,
     )
@@ -681,15 +670,11 @@ def step_grompp_mdrun_em(cfg: PipelineConfig, nt: int) -> None:
 
     run(
         [
-            "gmx",
-            "mdrun",
-            "-ntmpi",
-            "1",
-            "-nt",
-            str(nt),
+            "gmx", "mdrun",
+            "-ntmpi", "1",
+            "-nt", str(nt),
             "-v",
-            "-deffnm",
-            cfg.em_deffnm,
+            "-deffnm", cfg.em_deffnm,
         ],
         cwd=cfg.workdir,
     )
@@ -704,16 +689,12 @@ def step_grompp_mdrun_nvt(cfg: PipelineConfig, nt: int) -> None:
 
     run(
         [
-            "gmx",
-            "grompp",
-            "-f",
-            str(cfg.nvt_mdp),
-            "-c",
-            str(c_in),
-            "-p",
-            str(cfg.system_top),
-            "-o",
-            str(cfg.nvt_tpr),
+            "gmx", "grompp",
+            "-f", str(cfg.nvt_mdp),
+            "-c", str(c_in),
+            "-r", str(c_in),
+            "-p", str(cfg.system_top),
+            "-o", str(cfg.nvt_tpr),
         ],
         cwd=cfg.workdir,
     )
@@ -723,13 +704,10 @@ def step_grompp_mdrun_nvt(cfg: PipelineConfig, nt: int) -> None:
         [
             "gmx",
             "mdrun",
-            "-ntmpi",
-            "1",
-            "-nt",
-            str(nt),
+            "-ntmpi", "1",
+            "-nt", str(nt),
             "-v",
-            "-deffnm",
-            cfg.nvt_deffnm,
+            "-deffnm", cfg.nvt_deffnm,
         ],
         cwd=cfg.workdir,
     )
@@ -770,7 +748,9 @@ def step_grompp_mdrun_npt(cfg: PipelineConfig, nt: int) -> None:
 
     else:
         gro_in = workdir / f"{cfg.nvt_deffnm}.gro"
-        cpt_in = None
+        cpt_in = workdir / f"{cfg.nvt_deffnm}.cpt"
+        if not cpt_in.exists():
+            cpt_in = None
 
     # ------------------------------------------------
     # Run grompp (must always get a .gro, never .cpt)
@@ -779,10 +759,14 @@ def step_grompp_mdrun_npt(cfg: PipelineConfig, nt: int) -> None:
         "gmx", "grompp",
         "-f", str(cfg.npt_mdp),
         "-c", str(gro_in),
+        "-r", str(gro_in),
         "-p", str(cfg.system_top),
         "-o", str(cfg.npt_tpr),
         "-maxwarn", "1",
     ]
+
+    if cpt_in:
+        cmd.extend(["-t", str(cpt_in)])
 
     run(cmd, cwd=workdir)
     must_exist(cfg.npt_tpr, "npt.tpr")
@@ -800,9 +784,9 @@ def step_grompp_mdrun_npt(cfg: PipelineConfig, nt: int) -> None:
         # "-c", f"{cfg.npt_deffnm}.gro", # <<< FORCE OUTPUT NAME
     ]
 
-    if cpt_in:
-        mdrun_cmd.insert(3, "-cpi")
-        mdrun_cmd.insert(4, str(cpt_in))
+    # if cpt_in:
+    #     mdrun_cmd.insert(3, "-cpi")
+    #     mdrun_cmd.insert(4, str(cpt_in))
 
     run(mdrun_cmd, cwd=workdir)
 
@@ -1365,7 +1349,7 @@ def main(argv=None) -> None:
                 orth_itp,
                 bond_factor=1.0,
                 angle_factor=1.0,
-                dihedral_factor=0.5,
+                dihedral_factor=1.0,
                 bond_k_min=50,
                 angle_k_min=0,
                 dihedral_k_min=0,
