@@ -28,13 +28,17 @@ def load_ligand_residue(system_gro: Path) -> str:
     raise ValueError("Ligand residue 'ORT' not found in system.gro")
 
 def compute_ligand_rmsd_single(job_dir: Path, ligand_resname="ORT"):
-    system = job_dir / "input" / "system.gro"
-
     out_dir = job_dir / "out"
+
+    for candidate in ["md.gro", "npt.gro", "em.gro"]:
+        system = out_dir / candidate
+        if system.exists():
+            break
 
     traj = out_dir / "md.xtc"
 
     if not traj.exists():
+
         # Look for continuation parts: md.partXXXX.xtc
         import re
 
@@ -54,16 +58,32 @@ def compute_ligand_rmsd_single(job_dir: Path, ligand_resname="ORT"):
 
         print(f"[RMSD] Using continuation trajectory: {latest_part.name}")
 
-        traj = latest_part
+        traj =  latest_part
+
+    print("SYSTEM:", system)
+    print("SYSTEM EXISTS:", system.exists())
+    print("TRAJ:", traj)
+    print("TRAJ EXISTS:", traj.exists())
 
     if not system.exists():
         return {"error": f"Missing file: {system}"}
     if not traj.exists():
         return {"error": f"Missing file: {traj}"}
 
-    # Load full trajectory with topology
-    t = md.load(str(traj), top=str(system))
 
+    # Load full trajectory with topology
+    try:
+        t = md.load(str(traj), top=str(system))
+    except Exception as e:
+        return {
+            "error": f"Failed to load trajectory with topology.\n"
+                     f"traj={traj}\n"
+                     f"top={system}\n"
+                     f"{type(e).__name__}: {e}"
+        }
+    print("DEBUG: md.txc not found", traj)
+
+    # t = md.load(str(traj), top=str(system))
     # Reference = first frame of trajectory (Trajectory object)
     ref = t[0:1]
     ref.xyz = ref.xyz.copy()

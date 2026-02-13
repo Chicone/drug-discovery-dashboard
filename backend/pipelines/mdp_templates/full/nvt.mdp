@@ -6,8 +6,8 @@
 define                  =
 
 integrator              = md
-dt                      = 0.01      ; ultra-safe: 2 fs
-nsteps                  = 25000     ; 0.25 ns (adjust as needed)
+dt                      = 0.008      ; ultra-safe: 2 fs
+nsteps                  = 50000     ; 1 ns (adjust as needed)
 
 ; Velocity generation (replica diversification)
 gen_vel  = yes
@@ -16,9 +16,12 @@ gen_seed = -1     ; new random seed every time
 
 ; ----- Temperature control -----
 tcoupl                  = v-rescale
-tc-grps                 = Protein ORT POPC W ION
-tau-t                   = 2.0 2.0 2.0 2.0 2.0
-ref-t                   = 310 310 310 310 310
+tc-grps                 = System
+tau-t                   = 2.0
+ref-t                   = 310
+;tc-grps                 = Protein ORT POPC W ION
+;tau-t                   = 2.0 2.0 2.0 2.0 2.0
+;ref-t                   = 310 310 310 310 310
 
 ; ----- Pressure control ------
 pcoupl                  = no        ; NVT only
@@ -26,7 +29,7 @@ pcoupl                  = no        ; NVT only
 ; ----- Position restraints ----
 ; Make sure your protein has #ifdef POSRES in the .top
 ; and use "-DPOSRES" for VERY fragile cases.
-;define                 = -DPOSRES
+define                 = -DPOSRES
 
 ; ----- Periodic boundary -----
 pbc                     = xyz
@@ -43,7 +46,9 @@ nstlist                 = 20
 ns_type                 = grid
 
 ; ----- Constraints -----
-constraints             = none
+constraints             = h-bonds
+lincs-order = 8
+lincs-iter  = 2
 
 ; ----- COM motion -----
 comm-mode               = Linear
