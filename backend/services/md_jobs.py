@@ -75,8 +75,8 @@ def create_md_job_service(
     try:
         allowed_scenarios = {
             # Protein only
-            "protein_membrane",
-            "protein_water",
+            "protein_only_membrane",
+            "protein_only_water",
 
             # Protein + orthosteric
             "protein_plus_orthosteric_membrane",
@@ -265,7 +265,7 @@ def create_md_job_service(
         orth_extracted = False
         extract_summary = None
 
-        needs_orth = scenario != "ligand_water"
+        needs_orth = scenario.startswith("protein_plus_orthosteric")
 
         # Option A: extract orthosteric from uploaded protein.pdb if not provided
         if needs_orth and orthosteric_ligand is None:

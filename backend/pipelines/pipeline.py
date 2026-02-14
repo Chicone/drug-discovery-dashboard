@@ -687,10 +687,6 @@ def step_write_mdps(cfg: PipelineConfig, md_ns_override: Optional[float] = None)
         template_dir = MDP_DIR / "ligand_water"
         print("[mdp] Using ligand_water MDP templates")
 
-    elif scenario == "protein_only":
-        template_dir = MDP_DIR / "protein_only"
-        print("[mdp] Using protein_only MDP templates")
-
     elif scenario.endswith("_water"):
         template_dir = MDP_DIR / "protein_only"
         print("[mdp] Using protein_water MDP templates")
