@@ -23,7 +23,7 @@ function MolecularDynamics() {
   const [allostericPoseFile, setAllostericPoseFile] = useState(null);
 
   // Scenario selector
-  const [scenario, setScenario] = useState("protein_membrane");
+  const [scenario, setScenario] = useState("protein_plus_orthosteric_membrane");
 
   // Split presets: build vs run
   const [presetBuild, setPresetBuild] = useState("m3_popc_build");
@@ -101,8 +101,12 @@ function MolecularDynamics() {
 
 const scenarios = useMemo(
   () => [
-    { id: "protein_membrane", label: "Protein + ligand + membrane" },
-    { id: "protein_water", label: "Protein + ligand in water" },
+    { id: "protein_only_membrane", label: "Protein only + membrane" },
+    { id: "protein_only_water", label: "Protein only in water" },
+
+    { id: "protein_plus_orthosteric_membrane", label: "Protein + orthosteric + membrane" },
+    { id: "protein_plus_orthosteric_water", label: "Protein + orthosteric in water" },
+
     { id: "ligand_water", label: "Ligand only in water" },
   ],
   []
@@ -242,9 +246,6 @@ async function openJob(id) {
   el.scrollTop = el.scrollHeight;
 }
 
-
-
-
 async function submitJob({ preset, workflow, parentJobId = null }) {
   setError(null);
 
@@ -254,12 +255,14 @@ async function submitJob({ preset, workflow, parentJobId = null }) {
     return;
   }
 
-  // Ligand always required
-  if (!orthostericFile) {
+  const ligandRequired =
+    scenario === "protein_plus_orthosteric_membrane" ||
+    scenario === "protein_plus_orthosteric_water";
+
+  if (ligandRequired && !orthostericFile) {
     setError("Orthosteric ligand is required.");
     return;
   }
-
 
   setIsSubmitting(true);
   logOffsetRef.current = 0;
@@ -447,7 +450,10 @@ async function createRunJob() {
     setAllostericPoseFile(f);
   }
 
-  const canSubmit = !!proteinFile && !isSubmitting;
+  const proteinRequired = scenario !== "ligand_water";
+
+  const canSubmit =
+    (!proteinRequired || !!proteinFile) && !isSubmitting;
 
   const runningCount = useMemo(() => {
     return recentJobs.filter(j => j.status === "running").length;
