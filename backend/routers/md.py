@@ -160,28 +160,38 @@ def stop_md_job(job_id: str):
 
     return {"status": "stopped", "job_id": job_id}
 
-@router.get("/md/log_tail")
-def get_log_tail(job_id: str, offset: int = 0):
+@router.get("/md/jobs/{job_id}/log")
+def get_log(job_id: str, offset: int = 0):
+
     job_dir = MD_RUNS_DIR / job_id
     log_path = job_dir / "log.txt"
 
     if not log_path.exists():
-        return {"chunk": "", "offset": offset}
+        return Response("", headers={"X-Log-Offset": "0"})
 
     size = log_path.stat().st_size
 
-    if offset > size:
-        # File was truncated or restarted
-        offset = 0
+    # 🔥 Always keep last 2MB window
+    MAX_WINDOW = 2_000_000
+
+    window_start = max(0, size - MAX_WINDOW)
+    window_size = size - window_start
+
+    # Tail mode
+    if offset > window_size:
+        offset = window_size
 
     with open(log_path, "rb") as f:
-        f.seek(offset)
+        f.seek(window_start + offset)
         chunk = f.read()
 
-    return {
-        "chunk": chunk.decode(errors="replace"),
-        "offset": offset + len(chunk)
-    }
+    return Response(
+        chunk,
+        media_type="text/plain",
+        headers={"X-Log-Offset": str(offset + len(chunk))}
+    )
+
+
 
 
 

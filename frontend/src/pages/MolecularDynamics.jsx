@@ -184,16 +184,33 @@ const scenarios = useMemo(
 
 
 
-  function openJob(id) {
-    if (!id) return;
-    setError(null);
-    setSelectedParentJobId(id);
-    setJobId(id);
-    setStatus("running");
-    logOffsetRef.current = 10 ** 15;
-    setFiles([]);
-    pollJob(id);
+async function openJob(id) {
+  if (!id) return;
+
+  if (pollTimerRef.current) {
+    clearInterval(pollTimerRef.current);
+    pollTimerRef.current = null;
   }
+
+  setError(null);
+  setSelectedParentJobId(id);
+  setJobId(id);
+  setStatus("running");
+
+  // Clear previous log
+  logBufferRef.current = [];
+  if (logRef.current) {
+    logRef.current.textContent = "";
+  }
+
+  // 🔥 Start in tail mode
+  logOffsetRef.current = 10 ** 15;
+
+  pollJob(id);
+}
+
+
+
 
 
 
@@ -205,22 +222,25 @@ const scenarios = useMemo(
   }
 
   function appendLog(chunk) {
-      const el = logRef.current;
-      if (!el || !chunk) return;
+  const el = logRef.current;
+  if (!el || !chunk) return;
 
-      const MAX_LINES = 2000;
+  const MAX_LINES = 2000;
 
-      const newLines = chunk.split("\n");
-      logBufferRef.current.push(...newLines);
+  // 🔥 Trim trailing newline first
+  const cleaned = chunk.replace(/\n+$/, "");
 
-      if (logBufferRef.current.length > MAX_LINES) {
-        logBufferRef.current =
-          logBufferRef.current.slice(-MAX_LINES);
-      }
+  const newLines = cleaned.split("\n");
+  logBufferRef.current.push(...newLines);
 
-      el.textContent = logBufferRef.current.join("\n");
-      el.scrollTop = el.scrollHeight;
+  if (logBufferRef.current.length > MAX_LINES) {
+    logBufferRef.current =
+      logBufferRef.current.slice(-MAX_LINES);
   }
+
+  el.textContent = logBufferRef.current.join("\n");
+  el.scrollTop = el.scrollHeight;
+}
 
 
 
@@ -398,6 +418,9 @@ async function createRunJob() {
     }
 
     if (latestStatus === "done" || latestStatus === "error") {
+        // 🔥 Fetch one last time before stopping
+        await fetchFinalLogChunk(id);
+
       if (pollTimerRef.current) {
         clearInterval(pollTimerRef.current);
         pollTimerRef.current = null;
