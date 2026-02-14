@@ -47,9 +47,11 @@ backend/data/
 data/
 smiles/
 
-
-
 AutoMartini_M3/
+
+*.xtc
+archive/pdb/
+
 
 
 
