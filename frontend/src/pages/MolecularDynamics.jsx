@@ -23,7 +23,7 @@ function MolecularDynamics() {
   const [allostericPoseFile, setAllostericPoseFile] = useState(null);
 
   // Scenario selector
-  const [scenario, setScenario] = useState("protein_only");
+  const [scenario, setScenario] = useState("protein_membrane");
 
   // Split presets: build vs run
   const [presetBuild, setPresetBuild] = useState("m3_popc_build");
@@ -33,6 +33,9 @@ function MolecularDynamics() {
   const [status, setStatus] = useState(null);
   const logRef = useRef(null);
   const logOffsetRef = useRef(0);
+  const logBufferRef = useRef([]);
+  const pollTimerRef = useRef(null);
+
   //   const [logText, setLogText] = useState("");
   const [files, setFiles] = useState([]);
   const [error, setError] = useState(null);
@@ -40,12 +43,14 @@ function MolecularDynamics() {
 
   // Recent jobs
   const [recentJobs, setRecentJobs] = useState([]);
+  const runningCount = useMemo(() => {
+    return recentJobs.filter(j => j.status === "running").length;
+  }, [recentJobs]);
   const [historyLimit, setHistoryLimit] = useState(20);
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState(null);
   const [selectedParentJobId, setSelectedParentJobId] = useState(null);
 
-  const [environment, setEnvironment] = useState("membrane");
   const [lastBuildJobId, setLastBuildJobId] = useState(null);
   const [mdDurationNs, setMdDurationNs] = useState(50);
   const [numThreads, setNumThreads] = useState(1);
@@ -97,18 +102,14 @@ function MolecularDynamics() {
     [presetsAll]
   );
 
-  const scenarios = useMemo(
-    () => [
-      { id: "protein_only", label: "Protein only" },
-      { id: "protein_plus_orthosteric", label: "Protein + orthosteric ligand" },
-      {
-        id: "protein_plus_orthosteric_plus_allosteric",
-        label: "Protein + orthosteric + allosteric ligand",
-      },
-      { id: "dimer_two_ligands", label: "Dimer + 2 orthosteric ligands" },
-    ],
-    []
-  );
+const scenarios = useMemo(
+  () => [
+    { id: "protein_membrane", label: "Protein + ligand + membrane" },
+    { id: "protein_water", label: "Protein + ligand in water" },
+    { id: "ligand_water", label: "Ligand only in water" },
+  ],
+  []
+);
 
   const stopRunJob = async () => {
     if (!jobId) return;
@@ -176,13 +177,23 @@ function MolecularDynamics() {
   }, [lockedJobs]);
 
 
+  useEffect(() => {
+    return () => {
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+      }
+    };
+  }, []);
+
+
+
   function openJob(id) {
     if (!id) return;
     setError(null);
     setSelectedParentJobId(id);
     setJobId(id);
     setStatus("running");
-    logOffsetRef.current = 0;
+    logOffsetRef.current = 10 ** 15;
     setFiles([]);
     pollJob(id);
   }
@@ -195,46 +206,40 @@ function MolecularDynamics() {
   }
 
   function appendLog(chunk) {
-    const el = logRef.current;
-    if (!el || !chunk) return;
+      const el = logRef.current;
+      if (!el || !chunk) return;
 
-    el.textContent += chunk;
+      const MAX_LINES = 2000;
 
-    // Optional: keep only last X lines
-    const MAX_LINES = 2000;
-    let lines = el.textContent.split("\n");
-    if (lines.length > MAX_LINES) {
-      lines = lines.slice(lines.length - MAX_LINES);
-      el.textContent = lines.join("\n");
-    }
+      const newLines = chunk.split("\n");
+      logBufferRef.current.push(...newLines);
 
-    el.scrollTop = el.scrollHeight; // auto scroll
+      if (logBufferRef.current.length > MAX_LINES) {
+        logBufferRef.current =
+          logBufferRef.current.slice(-MAX_LINES);
+      }
+
+      el.textContent = logBufferRef.current.join("\n");
+      el.scrollTop = el.scrollHeight;
   }
+
 
 
 async function submitJob({ preset, workflow, parentJobId = null }) {
   setError(null);
 
-  if (!proteinFile) {
-    setError("Please select a PDB file first.");
+  // Protein required except ligand-only scenario
+  if (scenario !== "ligand_water" && !proteinFile) {
+    setError("Protein PDB required for this scenario.");
     return;
   }
 
-  if (
-    scenario === "protein_plus_orthosteric_plus_allosteric" &&
-    !allostericPoseFile
-  ) {
-    setError("Scenario requires an allosteric pose file.");
+  // Ligand always required
+  if (!orthostericFile) {
+    setError("Orthosteric ligand is required.");
     return;
   }
 
-  if (
-    scenario !== "protein_only" &&
-    !orthostericFile
-  ) {
-    setError("Scenario requires an orthosteric ligand from a docked complex.");
-    return;
-  }
 
   setIsSubmitting(true);
   logOffsetRef.current = 0;
@@ -246,11 +251,12 @@ async function submitJob({ preset, workflow, parentJobId = null }) {
     const form = new FormData();
 
     // Always required by backend
-    form.append("protein_pdb", proteinFile);
+    if (scenario !== "ligand_water") {
+      form.append("protein_pdb", proteinFile);
+    }
 
     form.append("preset", preset);
     form.append("scenario", scenario);
-    form.append("environment", environment);
     form.append("workflow", workflow);
     form.append("md_ns", mdDurationNs);
     form.append("nt", numThreads);
@@ -310,11 +316,11 @@ async function createBuildJob() {
 }
 
 async function createRunJob() {
-  // Prevent double runs
-  if (status === "running") {
-    setError("A simulation is already running.");
-    return;
-  }
+//   // Prevent double runs
+//   if (status === "running") {
+//     setError("A simulation is already running.");
+//     return;
+//   }
 
   const parentId = selectedParentJobId || lastBuildJobId;
 
@@ -342,56 +348,65 @@ async function createRunJob() {
 
 
   async function pollJob(id) {
-    const intervalMs = 1000;
-    let timer = null;
+  const intervalMs = 1000;
 
-    async function tick() {
-      let latestStatus = null;
+  // 🔥 Clear any existing polling loop
+  if (pollTimerRef.current) {
+    clearInterval(pollTimerRef.current);
+    pollTimerRef.current = null;
+  }
 
-      try {
-        const sRes = await fetch(`/api/md/jobs/${id}`);
-        if (sRes.ok) {
-          const s = await sRes.json();
-          latestStatus = s.status;
-          setStatus(latestStatus);
-        }
+  async function tick() {
+    let latestStatus = null;
 
-        const lRes = await fetch(
-          `/api/md/jobs/${id}/log?offset=${logOffsetRef.current}`
+    try {
+      const sRes = await fetch(`/api/md/jobs/${id}`);
+      if (sRes.ok) {
+        const s = await sRes.json();
+        latestStatus = s.status;
+        setStatus(latestStatus);
+      }
+
+      const lRes = await fetch(
+        `/api/md/jobs/${id}/log?offset=${logOffsetRef.current}`
+      );
+
+      if (lRes.ok) {
+        const chunk = await lRes.text();
+
+        const newOffset = parseInt(
+          lRes.headers.get("X-Log-Offset") ??
+            logOffsetRef.current + chunk.length,
+          10
         );
 
-        if (lRes.ok) {
-          const chunk = await lRes.text();
-          const newOffset = parseInt(
-            lRes.headers.get("X-Log-Offset") ||
-              `${logOffsetRef.current + chunk.length}`,
-            10
-          );
-
-          if (chunk.length > 0) {
-            appendLog(chunk);
-          }
-
-          logOffsetRef.current = newOffset;
+        if (chunk.length > 0) {
+          appendLog(chunk);
         }
 
-        const fRes = await fetch(`/api/md/jobs/${id}/files`);
-        if (fRes.ok) {
-          const f = await fRes.json();
-          setFiles(f.files || []);
-        }
-      } catch (e) {
-        setError((prev) => prev || (e.message || String(e)));
+        logOffsetRef.current = newOffset;
       }
 
-      if (latestStatus === "done" || latestStatus === "error") {
-        if (timer) clearInterval(timer);
+      const fRes = await fetch(`/api/md/jobs/${id}/files`);
+      if (fRes.ok) {
+        const f = await fRes.json();
+        setFiles(f.files || []);
       }
+    } catch (e) {
+      setError((prev) => prev || (e.message || String(e)));
     }
 
-    await tick();
-    timer = setInterval(tick, intervalMs);
+    if (latestStatus === "done" || latestStatus === "error") {
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    }
   }
+
+  await tick();
+  pollTimerRef.current = setInterval(tick, intervalMs);
+}
 
   function onPickProtein(e) {
     const f = e.target.files?.[0] || null;
@@ -427,6 +442,13 @@ return (
     <Typography variant="body1" sx={{ mb: 2, color: "#aaa" }}>
       Build a Martini system, then run equilibration or production presets.
     </Typography>
+
+    {runningCount > 0 && (
+      <Typography variant="body2" sx={{ color: "#66bb6a", mb: 1 }}>
+        {runningCount} job{runningCount > 1 ? "s" : ""} running
+      </Typography>
+    )}
+
 
     <Divider sx={{ borderColor: "#333", mb: 2 }} />
 
@@ -662,20 +684,7 @@ return (
             )}
           </Box>
 
-          {/* Environment */}
-          <TextField
-            select
-            label="Environment"
-            value={environment}
-            onChange={(e) => setEnvironment(e.target.value)}
-            size="small"
-            sx={{ maxWidth: 360 }}
-          >
-            <MenuItem value="membrane">
-              Membrane + solvent (recommended for GPCR)
-            </MenuItem>
-            <MenuItem value="solvated_box">Solvated box (no membrane)</MenuItem>
-          </TextField>
+
 
           <Divider sx={{ borderColor: "#333" }} />
 
@@ -752,7 +761,8 @@ return (
             <Button
               variant="outlined"
               onClick={createRunJob}
-              disabled={!canSubmit || status === "running"}
+              disabled={!canSubmit}
+//               disabled={!canSubmit || status === "running"}
               sx={{ minWidth: 110 }}
             >
               Run MD
