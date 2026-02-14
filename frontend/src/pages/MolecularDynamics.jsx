@@ -43,9 +43,6 @@ function MolecularDynamics() {
 
   // Recent jobs
   const [recentJobs, setRecentJobs] = useState([]);
-  const runningCount = useMemo(() => {
-    return recentJobs.filter(j => j.status === "running").length;
-  }, [recentJobs]);
   const [historyLimit, setHistoryLimit] = useState(20);
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState(null);
@@ -198,6 +195,8 @@ const scenarios = useMemo(
     pollJob(id);
   }
 
+
+
   function workflowFromRunPreset(preset) {
     if (!preset.includes("_prod_")) {
       throw new Error(`Invalid run preset: ${preset}`);
@@ -222,6 +221,7 @@ const scenarios = useMemo(
       el.textContent = logBufferRef.current.join("\n");
       el.scrollTop = el.scrollHeight;
   }
+
 
 
 
@@ -348,24 +348,25 @@ async function createRunJob() {
 
 
   async function pollJob(id) {
-  const intervalMs = 1000;
 
-  // 🔥 Clear any existing polling loop
-  if (pollTimerRef.current) {
-    clearInterval(pollTimerRef.current);
-    pollTimerRef.current = null;
-  }
+    const intervalMs = 1000;
 
-  async function tick() {
-    let latestStatus = null;
+    // 🔥 Clear any existing polling loop
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
 
-    try {
-      const sRes = await fetch(`/api/md/jobs/${id}`);
-      if (sRes.ok) {
-        const s = await sRes.json();
-        latestStatus = s.status;
-        setStatus(latestStatus);
-      }
+    async function tick() {
+      let latestStatus = null;
+
+      try {
+        const sRes = await fetch(`/api/md/jobs/${id}`);
+        if (sRes.ok) {
+          const s = await sRes.json();
+          latestStatus = s.status;
+          setStatus(latestStatus);
+        }
 
       const lRes = await fetch(
         `/api/md/jobs/${id}/log?offset=${logOffsetRef.current}`
@@ -425,6 +426,11 @@ async function createRunJob() {
 
   const canSubmit = !!proteinFile && !isSubmitting;
 
+  const runningCount = useMemo(() => {
+    return recentJobs.filter(j => j.status === "running").length;
+  }, [recentJobs]);
+
+
 return (
   <Paper
     sx={{
@@ -443,46 +449,41 @@ return (
       Build a Martini system, then run equilibration or production presets.
     </Typography>
 
-    {runningCount > 0 && (
-      <Typography variant="body2" sx={{ color: "#66bb6a", mb: 1 }}>
-        {runningCount} job{runningCount > 1 ? "s" : ""} running
-      </Typography>
-    )}
-
-
     <Divider sx={{ borderColor: "#333", mb: 2 }} />
 
     <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
       {/* Left: Recent jobs */}
-      <Box sx={{ minWidth: { xs: "100%", md: 360 }, maxWidth: 440 }}>
+      <Box sx={{ minWidth: { xs: "100%", md: 380 }, maxWidth: 460 }}>
         <Typography variant="subtitle1" sx={{ mb: 1 }}>
           Recent MD jobs
         </Typography>
 
         <Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: "center" }}>
-          <TextField
-            label="Limit (0 = all)"
-            type="number"
-            size="small"
-            value={historyLimit}
-            onChange={(e) => {
-              const n = Number(e.target.value);
-              if (!Number.isFinite(n)) return;
-              setHistoryLimit(Math.max(0, Math.floor(n)));
-            }}
-            sx={{ width: 160 }}
-          />
+              <TextField
+                label="Limit (0 = all)"
+                type="number"
+                size="small"
+                value={historyLimit}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  if (!Number.isFinite(n)) return;
+                  setHistoryLimit(Math.max(0, Math.floor(n)));
+                }}
+                sx={{ width: 160 }}
+              />
 
-          <Button
-            variant="outlined"
-            size="small"
-            onClick={() => loadRecentJobs(historyLimit)}
-            disabled={loadingJobs}
-          >
-            Refresh
-          </Button>
-        </Stack>
-
+              <Typography
+                variant="body2"
+                sx={{
+                  ml: 1,
+                  fontWeight: 600,
+                  color: runningCount > 0 ? "#66bb6a" : "#888",
+                  fontFamily: "monospace",
+                }}
+              >
+                {runningCount} running
+              </Typography>
+            </Stack>
         <Box
           sx={{
             border: "1px solid #333",
@@ -523,11 +524,18 @@ return (
                       </Typography>
 
                       <Typography
-                        variant="caption"
-                        sx={{ color: "#777", display: "block" }}
+                        variant="body2"
+                        sx={{
+                          fontFamily: "monospace",
+                          fontSize: "0.75rem",
+                          fontWeight: 600,
+                          color: "#66bb6a",
+                          letterSpacing: 0.5,
+                        }}
                       >
-                        {j.job_id}
+                      {j.job_id}
                       </Typography>
+
                     </Box>
 
                     {/* Right: lock + delete */}
