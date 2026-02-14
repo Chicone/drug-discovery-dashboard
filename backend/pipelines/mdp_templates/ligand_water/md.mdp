@@ -1,14 +1,13 @@
 ; MARTINI 3 — PRODUCTION RUN (GPCR)
 integrator          = md
-dt                  = 0.0025
-nsteps              = 500000     ; 0.1 μs (adjust as needed)
+dt                  = 0.01
+nsteps              = 10000000     ; 1.0 μs (adjust as needed)
 
 ; Velocity generation (replica diversification)
 gen_vel             = no
 
 ; *** NO POSITION RESTRAINTS ***
-;define              = -DPOSRES
-
+define              =
 
 ; Output control
 nstxout             = 0
@@ -31,23 +30,23 @@ epsilon_rf          = 15
 
 ; Temperature coupling — separate groups
 tcoupl              = v-rescale
-tc-grps             = Protein ORT POPC W ION
-tau-t               = 1.0 1.0 1.0 1.0 1.0
-ref-t               = 310 310 310 310 310
+tc-grps             = W ORT ION
+tau-t               = 1.0 1.0 1.0
+ref-t               = 310 310 310
 
 ; Pressure coupling — production quality
 pcoupl              = c-rescale          ; Better ensemble than Berendsen
-pcoupltype          = semiisotropic
+pcoupltype          = isotropic
 tau-p               = 12.0
-ref-p               = 1.0 1.0
-compressibility     = 3e-4 3e-4
+ref-p               = 1.0
+compressibility     = 3e-4
 
 ; No restraint scaling required
 refcoord_scaling    = all
 
 pbc                 = xyz
-constraints         = h-bonds
-lincs-order = 8
-lincs-iter  = 2
+constraints         = none
+lincs_order = 8
+lincs_iter  = 1
 
 

@@ -42,10 +42,9 @@ def run_cgmd_setup(request: MartiniSetupRequest):
 
 @router.post("/jobs")
 async def create_md_job(
-    protein_pdb: UploadFile = File(...),
+    protein_pdb: Optional[UploadFile] = File(None),
     preset: str = Form("cg_popc_50ns"),
     scenario: str = Form("protein_only"),
-    environment: str = Form("membrane"),  # "membrane" | "solvated_box"
     workflow: str = Form("build_only"),  # "build_only" | "equilibrate" | "full"
     parent_job_id: Optional[str] = Form(None),
     md_ns: Optional[float] = Form(None),
@@ -57,7 +56,6 @@ async def create_md_job(
         protein_pdb,
         preset,
         scenario,
-        environment,
         workflow,
         parent_job_id,
         md_ns,
