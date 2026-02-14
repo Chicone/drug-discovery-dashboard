@@ -49,7 +49,6 @@ def create_md_job_service(
     protein_pdb,
     preset,
     scenario,
-    environment,
     workflow,
     parent_job_id,
     md_ns,
@@ -62,22 +61,43 @@ def create_md_job_service(
     without modifying behavior.
     """
     print("DEBUG scenario =", scenario)
+
+    print("DEBUG protein_pdb =", protein_pdb)
+    print("DEBUG orthosteric_ligand =", orthosteric_ligand)
+    print("DEBUG scenario =", scenario)
+
+    if scenario != "ligand_water" and protein_pdb is None:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Protein PDB required for this scenario"},
+        )
+
     try:
         allowed_scenarios = {
-            "protein_only",
-            "protein_plus_orthosteric",
-            "protein_plus_orthosteric_plus_allosteric",
-            "dimer_two_ligands",
+            # Protein only
+            "protein_membrane",
+            "protein_water",
+
+            # Protein + orthosteric
+            "protein_plus_orthosteric_membrane",
+            "protein_plus_orthosteric_water",
+
+            # Protein + orthosteric + allosteric
+            "protein_plus_orthosteric_plus_allosteric_membrane",
+            "protein_plus_orthosteric_plus_allosteric_water",
+
+            # Ligand only
+            "ligand_water",
+
+            # Dimer
+            "dimer_membrane",
         }
+
         if scenario not in allowed_scenarios:
             return JSONResponse(
                 status_code=400,
                 content={"error": f"Invalid scenario: {scenario}"},
             )
-        allowed_env = {"membrane", "solvated_box"}
-        if environment not in allowed_env:
-            return JSONResponse(status_code=400,
-                                content={"error": f"Invalid environment: {environment}"})
 
         allowed_workflow = {
             "build_only",
@@ -227,22 +247,25 @@ def create_md_job_service(
                     content={"error": "No usable .cpt found in parent job"},
                 )
 
-        # --- Save protein ---
-        pdb_path = input_dir / "protein.pdb"
+        if scenario != "ligand_water" and protein_pdb is None:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Protein PDB required for this scenario"},
+            )
 
-        # Always save uploaded PDB first
-        protein_pdb.file.seek(0)
-        with open(pdb_path, "wb") as f:
-            shutil.copyfileobj(protein_pdb.file, f)
+        # --- Save protein ---
+        pdb_path = None
+        if protein_pdb is not None:
+            pdb_path = input_dir / "protein.pdb"
+            protein_pdb.file.seek(0)
+            with open(pdb_path, "wb") as f:
+                shutil.copyfileobj(protein_pdb.file, f)
 
         orth_path = None
         orth_extracted = False
         extract_summary = None
 
-        needs_orth = scenario in {
-            "protein_plus_orthosteric",
-            "protein_plus_orthosteric_plus_allosteric",
-        }
+        needs_orth = scenario != "ligand_water"
 
         # Option A: extract orthosteric from uploaded protein.pdb if not provided
         if needs_orth and orthosteric_ligand is None:
@@ -280,10 +303,6 @@ def create_md_job_service(
             with open(orth_path, "wb") as f:
                 shutil.copyfileobj(orthosteric_ligand.file, f)
 
-        protein_pdb.file.seek(0)
-        with open(pdb_path, "wb") as f:
-            shutil.copyfileobj(protein_pdb.file, f)
-
         allo_path = None
         if allosteric_pose is not None:
             allo_name = Path(allosteric_pose.filename).name
@@ -301,17 +320,20 @@ def create_md_job_service(
             "created_at": created_at,
             "preset": preset,
             "scenario": scenario,
-            "environment": environment,
             "workflow": workflow,
             "parent_job_id": parent_job_id,
-            "protein_filename": protein_pdb.filename,
+            "protein_filename": (
+                protein_pdb.filename if protein_pdb is not None else None
+            ),
             "orthosteric_filename": (
                 orthosteric_ligand.filename
                 if orthosteric_ligand is not None
                 else ("orthosteric_extracted.pdb" if orth_extracted else None)
             ),
-            "allosteric_pose_filename": allosteric_pose.filename
-            if allosteric_pose is not None else None,
+            "allosteric_pose_filename": (
+                allosteric_pose.filename
+                if allosteric_pose is not None else None
+            ),
             "orthosteric_extracted": orth_extracted,
             "orthosteric_extract_summary": extract_summary,
         }
@@ -326,7 +348,6 @@ def create_md_job_service(
         params = {
             "preset": preset,
             "scenario": scenario,
-            "environment": environment,
             "workflow": workflow,
             "parent_job_id": parent_job_id,
             "md_ns": md_ns,
@@ -691,8 +712,6 @@ def _run_and_stream(
     last_energy = None
     last_temp = None
     last_pressure = None
-    last_step_line = None
-
     catastrophic = False
     trigger_line = None
 

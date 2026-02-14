@@ -191,7 +191,7 @@ def patch_small_beads(itp_path: Path):
 
     # Only valid shrinkable mapping for your ligand:
     replacements = {
-        " SC5 ": " TC5 ",
+        " SC5 ": " TC4 ",
     }
 
     text = itp_path.read_text()
@@ -397,7 +397,7 @@ def step_insane(cfg: PipelineConfig) -> None:
         "-p", str(cfg.system_top),
         "-l", "POPC",
         "-sol", "W",
-        "-salt", "0.15",
+        "-salt", "0.01",
         "-center",
         # "-dm",  "0",
         "-ring",
@@ -410,7 +410,51 @@ def step_insane(cfg: PipelineConfig) -> None:
     must_exist(cfg.system_gro, "system.gro output")
     must_exist(cfg.system_top, "system.top output")
 
-def step_patch_system_top(cfg: PipelineConfig, inc: MartiniIncludes) -> None:
+def step_insane_water(cfg: PipelineConfig, include_protein: bool) -> None:
+    """
+    Build a water-only system (no membrane).
+    Uses INSANE but without -l POPC.
+    """
+
+    if include_protein:
+        must_exist(cfg.cg_pdb, "CG PDB input for insane")
+        input_pdb = str(cfg.cg_pdb)
+    else:
+        ligand_pdb = cfg.workdir / "orthosteric_cg.pdb"
+        must_exist(ligand_pdb, "orthosteric_cg.pdb for ligand-only system")
+
+        centered = cfg.workdir / "orthosteric_cg_centered.pdb"
+
+        run([
+            "gmx", "editconf",
+            "-f", str(ligand_pdb),
+            "-o", str(centered),
+            "-c"
+        ], cwd=cfg.workdir)
+
+        input_pdb = str(centered)
+
+    cmd = [
+        "insane",
+        "-f", input_pdb,
+        "-o", str(cfg.system_gro),
+        "-p", str(cfg.system_top),
+        "-sol", "W",
+        "-salt", "0.15",
+        "-box", "12.0,12.0,12.0",
+    ]
+
+    run(cmd, cwd=cfg.workdir)
+
+    must_exist(cfg.system_gro, "system.gro output")
+    must_exist(cfg.system_top, "system.top output")
+
+
+def step_patch_system_top(
+    cfg: PipelineConfig,
+    inc: MartiniIncludes,
+    scenario: str,
+) -> None:
     """
     Patch INSANE's system.top:
       - remove legacy martini.itp include
@@ -419,7 +463,8 @@ def step_patch_system_top(cfg: PipelineConfig, inc: MartiniIncludes) -> None:
       - fix NA+/CL- -> NA/CL
     """
     must_exist(cfg.system_top, "system.top to patch")
-    must_exist(cfg.itp_dst, "Protein.itp to include")
+    if scenario != "ligand_water":
+        must_exist(cfg.itp_dst, "Protein.itp to include")
 
     orth_itp = getattr(cfg, "orth_itp", None)
     allo_itp = getattr(cfg, "allo_itp", None)
@@ -449,6 +494,36 @@ def step_patch_system_top(cfg: PipelineConfig, inc: MartiniIncludes) -> None:
     kept = [l.replace("NA+", "NA").replace("CL-", "CL") for l in kept]
 
     # ------------------------------------------------------------
+    # REMOVE Protein molecule entry for ligand-only systems
+    # ------------------------------------------------------------
+    if scenario == "ligand_water":
+        cleaned = []
+        inside_mol = False
+
+        for line in kept:
+            s = line.strip().lower()
+
+            if s == "[ molecules ]":
+                inside_mol = True
+                cleaned.append(line)
+                continue
+
+            if inside_mol:
+                if s.startswith("[") and s.endswith("]"):
+                    inside_mol = False
+                    cleaned.append(line)
+                    continue
+
+                # Skip Protein line
+                if s.startswith("protein"):
+                    print("[patch] Removed Protein from [ molecules ]")
+                    continue
+
+            cleaned.append(line)
+
+        kept = cleaned
+
+    # ------------------------------------------------------------
     # 3) Prepend Martini 3 includes if not already present
     # ------------------------------------------------------------
     def inc_line(fname: str) -> str:
@@ -459,8 +534,11 @@ def step_patch_system_top(cfg: PipelineConfig, inc: MartiniIncludes) -> None:
         inc_line(inc.lipids_itp),
         inc_line(inc.solvents_itp),
         inc_line(inc.ions_itp),
-        '#include "Protein.itp"',
     ]
+
+    # Only include Protein.itp if this scenario has protein
+    if scenario != "ligand_water":
+        include_block.append('#include "Protein.itp"')
 
     if orth_itp is not None:
         must_exist(orth_itp, "Orthosteric ligand itp")
@@ -522,20 +600,25 @@ def step_patch_system_top(cfg: PipelineConfig, inc: MartiniIncludes) -> None:
                 to_add.append(f"{name:<8} {count}")
 
         if to_add:
-            # find protein line: first non-empty, non-comment molecule
-            insert_at = None
-            j = mol_i + 1
-            while j < mol_end:
-                s = kept[j].strip()
-                if s and not s.startswith(";"):  # protein line
-                    insert_at = j + 1  # insert AFTER protein
-                    break
-                j += 1
-            if insert_at is None:
-                insert_at = mol_end
+            if scenario == "ligand_water":
+                # ORT must be first molecule (matches system.gro)
+                insert_at = mol_i + 1
+                print("[patch] inserted at top (ligand_water):", ", ".join(to_add))
+            else:
+                # Insert after protein
+                insert_at = None
+                j = mol_i + 1
+                while j < mol_end:
+                    s = kept[j].strip()
+                    if s and not s.startswith(";"):
+                        insert_at = j + 1
+                        break
+                    j += 1
+                if insert_at is None:
+                    insert_at = mol_end
+                print("[patch] inserted after protein:", ", ".join(to_add))
 
             kept = kept[:insert_at] + to_add + kept[insert_at:]
-            print("[patch] inserted after protein:", ", ".join(to_add))
         else:
             print("[patch] [ molecules ] already contains ligand entries")
 
@@ -547,23 +630,24 @@ def step_patch_system_top(cfg: PipelineConfig, inc: MartiniIncludes) -> None:
     #
     # INSANE writes "Protein" in system.top, so we replace it.
     # ------------------------------------------------------------
-    for idx, line in enumerate(kept):
-        if line.strip().lower() == "[ molecules ]":
-            # find first real molecules entry
-            j = idx + 1
-            while j < len(kept) and (
-                kept[j].strip() == "" or kept[j].strip().startswith(";")
-            ):
-                j += 1
+    if scenario != "ligand_water":
+        for idx, line in enumerate(kept):
+            if line.strip().lower() == "[ molecules ]":
+                # find first real molecules entry
+                j = idx + 1
+                while j < len(kept) and (
+                    kept[j].strip() == "" or kept[j].strip().startswith(";")
+                ):
+                    j += 1
 
-            # Replace the name only (first column)
-            parts = kept[j].split()
-            if parts:
-                old = parts[0]
-                parts[0] = "Protein_0"
-                kept[j] = f"{parts[0]:<15} {parts[1]}"
-                print(f"[patch] Molecule name fixed: {old} -> Protein_0")
-            break
+                # Replace the name only (first column)
+                parts = kept[j].split()
+                if parts:
+                    old = parts[0]
+                    parts[0] = "Protein_0"
+                    kept[j] = f"{parts[0]:<15} {parts[1]}"
+                    print(f"[patch] Molecule name fixed: {old} -> Protein_0")
+                break
 
 
     # ------------------------------------------------------------
@@ -598,12 +682,24 @@ def step_write_mdps(cfg: PipelineConfig, md_ns_override: Optional[float] = None)
         params = json.loads(params_file.read_text())
         scenario = params.get("scenario")
 
-    if scenario == "protein_only":
+    if scenario == "ligand_water":
+        template_dir = MDP_DIR / "ligand_water"
+        print("[mdp] Using ligand_water MDP templates")
+
+    elif scenario == "protein_only":
         template_dir = MDP_DIR / "protein_only"
         print("[mdp] Using protein_only MDP templates")
-    else:
+
+    elif scenario.endswith("_water"):
+        template_dir = MDP_DIR / "protein_only"
+        print("[mdp] Using protein_water MDP templates")
+
+    elif scenario.endswith("_membrane"):
         template_dir = MDP_DIR / "full"
-        print("[mdp] Using full-system MDP templates")
+        print("[mdp] Using membrane/full MDP templates")
+
+    else:
+        raise ValueError(f"Unknown scenario for MDP selection: {scenario}")
 
     def cp(name, out_path):
         src = template_dir / name
@@ -1011,7 +1107,7 @@ def compute_cache_key(protein_aa: Path,
     return h.hexdigest()[:16]
 
 
-def cache_check_before_martinize(cfg, args, cache_root: Path):
+def cache_check_before_martinize(cfg, args, cache_root: Path, scenario: str):
     """
     Checks whether a cached martinized complex exists.
     If yes:
@@ -1025,14 +1121,19 @@ def cache_check_before_martinize(cfg, args, cache_root: Path):
     import hashlib
     hasher = hashlib.sha256()
 
-    # Protein AA PDB (cleaned)
-    hasher.update(cfg.aa_pdb.read_bytes())
+    if scenario != "ligand_water":
+        hasher.update(cfg.aa_pdb.read_bytes())
+    else:
+        hasher.update(b"NO-PROTEIN")
 
     # Ligand AA PDB (if present)
     if args.orthosteric_pdb:
         lig = Path(args.orthosteric_pdb)
         if lig.exists():
             hasher.update(lig.read_bytes())
+
+    # Scenario must affect cache key
+    hasher.update(scenario.encode("utf-8"))
 
     key = hasher.hexdigest()[:16]
     cache_dir = cache_root / key
@@ -1196,10 +1297,25 @@ def main(argv=None) -> None:
     CG_CACHE = Path("backend/data/cg_cache")
     CG_CACHE.mkdir(parents=True, exist_ok=True)
 
+    # ===============================================================
+    # Read scenario from params.json (affects caching and build)
+    # ===============================================================
+    params_file = cfg.workdir.parent / "input" / "params.json"
+
+    if not params_file.exists():
+        raise RuntimeError("Missing params.json: scenario must be defined")
+
+    params = json.loads(params_file.read_text())
+
+    scenario = params.get("scenario")
+    if scenario is None:
+        raise RuntimeError("params.json missing 'scenario'")
+
     # ============================================
     # MD-ONLY CONTINUATION MODE (SKIP FULL PIPELINE)
     # ============================================
     print("ARE YOU DOING MD? ", args.do_md)
+
     if args.do_md:
         print("MD-only mode detected -> skipping ALL build steps.")
 
@@ -1255,10 +1371,11 @@ def main(argv=None) -> None:
     # ===============================================================
     # 1) Extract protein-only AA PDB  (monomer or dimer preserved)
     # ===============================================================
-    protein_aa_clean = cfg.workdir / "protein_aa_clean.pdb"
-    extract_protein_only(cfg.aa_pdb, protein_aa_clean)
+    if scenario != "ligand_water":
+        protein_aa_clean = cfg.workdir / "protein_aa_clean.pdb"
+        extract_protein_only(cfg.aa_pdb, protein_aa_clean)
 
-    cfg = cfg.__class__(**{**cfg.__dict__, "aa_pdb": protein_aa_clean})
+        cfg = cfg.__class__(**{**cfg.__dict__, "aa_pdb": protein_aa_clean})
 
     # ===============================================================
     # SPECIAL CASE: Dimer scenario (placeholder)
@@ -1281,26 +1398,28 @@ def main(argv=None) -> None:
         extract_ligand(Path(args.orthosteric_pdb), ortho_aa)
 
     # CACHE CHECK
-    hit, cfg, cache_dir = cache_check_before_martinize(cfg, args, CG_CACHE)
-
+    hit, cfg, cache_dir = cache_check_before_martinize(
+        cfg, args, CG_CACHE, scenario
+    )
 
     SKIP_LIG = hit  # skip ligand build if cache hit
     args.skip_martinize = hit
 
     # ===============================================================
-    # 3) Martinize PROTEIN
+    # 3) Martinize PROTEIN (skip for ligand-only case)
     # ===============================================================
-    if not args.skip_martinize:
+    if not args.skip_martinize and scenario != "ligand_water":
         step_martinize(cfg)
 
     # --- Fix config paths after martinize2 ---
-    cfg = cfg.__class__(**{
-        **cfg.__dict__,
-        "cg_pdb": cfg.workdir / "Protein_cg.pdb",
-        "cg_top": cfg.workdir / "Protein.top",
-        "itp_src": cfg.workdir / "Protein_0.itp",
-        "itp_dst": cfg.workdir / "Protein.itp",
-    })
+    if scenario != "ligand_water":
+        cfg = cfg.__class__(**{
+            **cfg.__dict__,
+            "cg_pdb": cfg.workdir / "Protein_cg.pdb",
+            "cg_top": cfg.workdir / "Protein.top",
+            "itp_src": cfg.workdir / "Protein_0.itp",
+            "itp_dst": cfg.workdir / "Protein.itp",
+        })
 
     # ===============================================================
     # 4) Martinize LIGAND (if provided)
@@ -1327,40 +1446,57 @@ def main(argv=None) -> None:
         # patch_small_beads(orth_itp)
         # patch_ligand(orth_itp, factor=0.0, k_min=10)
 
-        # Combine protein + ligand into cg_complex.pdb
-        cg_complex = cfg.workdir / "cg_complex.pdb"
-        merge_cg_pdbs(cg_complex, cfg.cg_pdb, orth_cg)
+        if scenario != "ligand_water":
+            # Combine protein + ligand into cg_complex.pdb
+            cg_complex = cfg.workdir / "cg_complex.pdb"
+            merge_cg_pdbs(cg_complex, cfg.cg_pdb, orth_cg)
 
-        # Update cfg
-        cfg = cfg.__class__(**{
-            **cfg.__dict__,
-            "cg_pdb": cg_complex,
-            "orth_itp": orth_itp,
-        })
+            # Update cfg
+            cfg = cfg.__class__(**{
+                **cfg.__dict__,
+                "cg_pdb": cg_complex,
+                "orth_itp": orth_itp,
+            })
+        else:
+            # Ligand-only system: use ligand CG directly
+            cfg = cfg.__class__(**{
+                **cfg.__dict__,
+                "cg_pdb": orth_cg,
+                "orth_itp": orth_itp,
+            })
 
         # Save to cache since ligand was built now
         cache_save_after_martinize(cfg, cache_dir)
 
     elif args.orthosteric_pdb and SKIP_LIG:
         orth_itp = cfg.workdir / "Orthosteric.itp"
+        orth_cg = cfg.workdir / "orthosteric_cg.pdb"
 
         if orth_itp.exists():
+            # patch_small_beads(orth_itp)
             patch_ligand(
                 orth_itp,
-                bond_factor=1.0,
-                angle_factor=1.0,
-                dihedral_factor=1.0,
-                bond_k_min=50,
+                bond_factor=1,
+                angle_factor=1,
+                dihedral_factor=1,
+                bond_k_min=0,
                 angle_k_min=0,
                 dihedral_k_min=0,
             )
             print("[CACHE] Patched Orthosteric.itp from cache.")
 
-        cfg = cfg.__class__(**{
-            **cfg.__dict__,
-            "orth_itp": orth_itp,
-            "cg_pdb": cfg.workdir / "cg_complex.pdb",
-        })
+        if scenario != "ligand_water":
+            cfg = cfg.__class__(**{
+                **cfg.__dict__,
+                "orth_itp": orth_itp,
+                "cg_pdb": cfg.workdir / "cg_complex.pdb",
+            })
+        else:
+            cfg = cfg.__class__(**{
+                **cfg.__dict__,
+                "orth_itp": orth_itp,
+                "cg_pdb": orth_cg,
+            })
 
 
     elif not args.orthosteric_pdb:
@@ -1371,13 +1507,29 @@ def main(argv=None) -> None:
         })
 
     # ===============================================================
-    # 5) INSANE: build the membrane
+    # 5) INSANE Build environment depending on scenario
     # ===============================================================
     if not args.skip_insane:
-        step_insane(cfg)
+
+        # Membrane systems
+        if scenario.endswith("_membrane"):
+            print(f"\n[SCENARIO] {scenario} → membrane system")
+            step_insane(cfg)
+
+        # Water-only systems
+        elif scenario.endswith("_water"):
+            print(f"\n[SCENARIO] {scenario} → solvated box")
+
+            if scenario == "ligand_water":
+                step_insane_water(cfg, include_protein=False)
+            else:
+                step_insane_water(cfg, include_protein=True)
+
+        else:
+            raise ValueError(f"Unknown scenario: {scenario}")
 
     if not args.skip_patch_top:
-        step_patch_system_top(cfg, inc)
+        step_patch_system_top(cfg, inc, scenario)
 
     if not args.skip_ion_fix:
         step_fix_ions(cfg)
