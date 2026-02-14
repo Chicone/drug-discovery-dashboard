@@ -397,13 +397,14 @@ def step_insane(cfg: PipelineConfig) -> None:
         "-p", str(cfg.system_top),
         "-l", "POPC",
         "-sol", "W",
-        "-salt", "0.01",
+        "-salt", "0.02",
         "-center",
         # "-dm",  "0",
         "-ring",
         "-d", "1.2",
         "-box", "14.0,14.0,20.0",
-         # "-box","10.0,10.0,13.0",
+        # "-box", "16.0,16.0,22.0",
+         # "-box","11.0,11.0,15.0",
     ]
     run(cmd, cwd=cfg.workdir)
 
