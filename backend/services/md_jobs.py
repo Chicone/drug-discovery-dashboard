@@ -60,11 +60,11 @@ def create_md_job_service(
     This function contains EXACTLY the logic currently in md.py:create_md_job,
     without modifying behavior.
     """
-    print("DEBUG scenario =", scenario)
-
-    print("DEBUG protein_pdb =", protein_pdb)
-    print("DEBUG orthosteric_ligand =", orthosteric_ligand)
-    print("DEBUG scenario =", scenario)
+    # print("DEBUG scenario =", scenario)
+    #
+    # print("DEBUG protein_pdb =", protein_pdb)
+    # print("DEBUG orthosteric_ligand =", orthosteric_ligand)
+    # print("DEBUG scenario =", scenario)
 
     if scenario != "ligand_water" and protein_pdb is None:
         return JSONResponse(
