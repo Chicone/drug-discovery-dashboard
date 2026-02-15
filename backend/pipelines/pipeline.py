@@ -1428,7 +1428,7 @@ def main(argv=None) -> None:
         # Fresh ligand build
         from .ligand_cg_builder import build_ligand
 
-        SMILES_ORTHO = "n1c(N2CCCCC2)c(C#N)c(c3ccccc3)c(C#N)c(N)1"
+        SMILES_ORTHO = args.orthosteric_smiles
 
         orth_cg = cfg.workdir / "orthosteric_cg.pdb"
         orth_itp = cfg.workdir / "Orthosteric.itp"

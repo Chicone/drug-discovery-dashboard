@@ -22,6 +22,12 @@ function MolecularDynamics() {
   const [orthostericFile, setOrthostericFile] = useState(null);
   const [allostericPoseFile, setAllostericPoseFile] = useState(null);
 
+  // NECA default SMILES
+  const DEFAULT_SMILES = "CCNC(=O)[C@@H]1[C@H]([C@H]([C@@H](O1)N2C=NC3=C(N=CN=C32)N)O)O";
+  const [orthostericSmiles, setOrthostericSmiles] = useState(DEFAULT_SMILES);
+
+  const smilesInputRef = useRef(null);
+
   // Scenario selector
   const [scenario, setScenario] = useState("protein_plus_orthosteric_membrane");
 
@@ -112,6 +118,22 @@ const scenarios = useMemo(
   []
 );
 
+const needsProtein = scenario !== "ligand_water";
+
+const needsOrth = useMemo(
+  () =>
+    scenario === "protein_plus_orthosteric_membrane" ||
+    scenario === "protein_plus_orthosteric_water" ||
+    scenario === "ligand_water",
+  [scenario]
+);
+
+const needsAllo = useMemo(
+  () => false, // not implemented yet in your scenarios list
+  [scenario]
+);
+
+
   const stopRunJob = async () => {
     if (!jobId) return;
 
@@ -152,15 +174,6 @@ const scenarios = useMemo(
   }, [historyLimit]);
 
   useEffect(() => {
-    if (scenario === "protein_only") {
-      setOrthostericFile(null);
-      setAllostericPoseFile(null);
-    } else if (scenario === "protein_plus_orthosteric") {
-      setAllostericPoseFile(null);
-    }
-  }, [scenario]);
-
-  useEffect(() => {
     const saved = localStorage.getItem("lastBuildJobId");
     if (saved) {
       setLastBuildJobId(saved);
@@ -185,6 +198,22 @@ const scenarios = useMemo(
       }
     };
   }, []);
+
+useEffect(() => {
+  if (!needsOrth) {
+    setOrthostericFile(null);
+    if (orthostericInputRef.current) {
+      orthostericInputRef.current.value = "";
+    }
+  }
+
+  if (!needsAllo) {
+    setAllostericPoseFile(null);
+    if (allostericInputRef.current) {
+      allostericInputRef.current.value = "";
+    }
+  }
+}, [needsOrth, needsAllo]);
 
 
 
@@ -212,11 +241,6 @@ async function openJob(id) {
 
   pollJob(id);
 }
-
-
-
-
-
 
   function workflowFromRunPreset(preset) {
     if (!preset.includes("_prod_")) {
@@ -249,20 +273,33 @@ async function openJob(id) {
 async function submitJob({ preset, workflow, parentJobId = null }) {
   setError(null);
 
-  // Protein required except ligand-only scenario
-  if (scenario !== "ligand_water" && !proteinFile) {
+  // Protein required unless ligand-only
+  if (needsProtein && !proteinFile) {
     setError("Protein PDB required for this scenario.");
     return;
   }
 
-  const ligandRequired =
-    scenario === "protein_plus_orthosteric_membrane" ||
-    scenario === "protein_plus_orthosteric_water";
+  // Ligand scenarios require BOTH: pose PDB + SMILES
+  if (needsOrth) {
+    if (!orthostericFile) {
+      setError(
+        scenario === "ligand_water"
+          ? "Ligand pose PDB is required."
+          : "Orthosteric pose PDB is required."
+      );
+      return;
+    }
 
-  if (ligandRequired && !orthostericFile) {
-    setError("Orthosteric ligand is required.");
-    return;
+    if (!orthostericSmiles?.trim()) {
+      setError(
+        scenario === "ligand_water"
+          ? "Ligand SMILES is required."
+          : "Orthosteric SMILES is required."
+      );
+      return;
+    }
   }
+
 
   setIsSubmitting(true);
   logOffsetRef.current = 0;
@@ -271,10 +308,10 @@ async function submitJob({ preset, workflow, parentJobId = null }) {
   setStatus("queued");
 
   try {
+
     const form = new FormData();
 
-    // Always required by backend
-    if (scenario !== "ligand_water") {
+    if (needsProtein) {
       form.append("protein_pdb", proteinFile);
     }
 
@@ -288,9 +325,18 @@ async function submitJob({ preset, workflow, parentJobId = null }) {
       form.append("parent_job_id", parentJobId);
     }
 
-    if (orthostericFile) {
-      form.append("orthosteric_ligand", orthostericFile);
+    if (needsOrth) {
+      if (orthostericFile) {
+        form.append("orthosteric_ligand", orthostericFile);
+      }
+
+      if (orthostericSmiles?.trim()) {
+        form.append("orthosteric_smiles", orthostericSmiles.trim());
+      }
     }
+
+
+
     if (allostericPoseFile) {
       form.append("allosteric_pose", allostericPoseFile);
     }
@@ -421,8 +467,6 @@ async function createRunJob() {
     }
 
     if (latestStatus === "done" || latestStatus === "error") {
-        // 🔥 Fetch one last time before stopping
-        await fetchFinalLogChunk(id);
 
       if (pollTimerRef.current) {
         clearInterval(pollTimerRef.current);
@@ -450,10 +494,39 @@ async function createRunJob() {
     setAllostericPoseFile(f);
   }
 
-  const proteinRequired = scenario !== "ligand_water";
+  function onPickSmilesFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+
+    reader.onload = (event) => {
+      const text = event.target.result || "";
+      const lines = text
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean);
+
+      if (lines.length === 0) return;
+
+      // Take first non-empty line
+      const firstLine = lines[0];
+
+      // If format is: SMILES  name
+      const smiles = firstLine.split(/\s+/)[0];
+
+      setOrthostericSmiles(smiles);
+    };
+
+    reader.readAsText(file);
+  }
+
 
   const canSubmit =
-    (!proteinRequired || !!proteinFile) && !isSubmitting;
+    (!needsProtein || !!proteinFile) &&
+    (!needsOrth || (!!orthostericFile && !!orthostericSmiles?.trim())) &&
+    (!needsAllo || !!allostericPoseFile) &&
+    !isSubmitting;
 
   const runningCount = useMemo(() => {
     return recentJobs.filter(j => j.status === "running").length;
@@ -648,34 +721,38 @@ return (
             alignItems="center"
             sx={{ flexWrap: "wrap" }}
           >
-            <Button
-              variant="contained"
-              color="secondary"
-              onClick={() => proteinInputRef.current?.click()}
-              sx={{ minWidth: 110 }}
-            >
-              PDB
-            </Button>
+        <Button
+          variant="outlined"
+          color="secondary"
+          onClick={() => proteinInputRef.current?.click()}
+          disabled={!needsProtein}
+          sx={{ minWidth: 110 }}
+        >
+          Receptor
+        </Button>
+
 
             <Button
               variant="outlined"
               color="secondary"
               onClick={() => orthostericInputRef.current?.click()}
-              disabled={scenario === "protein_only"}
+              disabled={!needsOrth}
               sx={{ minWidth: 110 }}
             >
-              Ortho
+              {scenario === "ligand_water" ? "Ligand" : "Ortho"}
             </Button>
 
+
             <Button
-              variant="outlined"
-              color="secondary"
-              onClick={() => allostericInputRef.current?.click()}
-              disabled={scenario !== "protein_plus_orthosteric_plus_allosteric"}
-              sx={{ minWidth: 110 }}
-            >
-              Allo
-            </Button>
+                  variant="outlined"
+                  color="secondary"
+                  onClick={() => allostericInputRef.current?.click()}
+                  disabled={!needsAllo}
+                  sx={{ minWidth: 110 }}
+                >
+                  Allo
+                </Button>
+
 
             <input
               ref={proteinInputRef}
@@ -700,7 +777,46 @@ return (
               style={{ display: "none" }}
               onChange={onPickAllostericPose}
             />
+
+            <input
+              ref={smilesInputRef}
+              type="file"
+              accept=".smi,.smiles,.txt"
+              style={{ display: "none" }}
+              onChange={onPickSmilesFile}
+            />
+
+
+
           </Stack>
+
+            {needsOrth && (
+  <>
+    <TextField
+      label={
+        scenario === "ligand_water"
+          ? "Ligand SMILES"
+          : "Orthosteric SMILES (required)"
+      }
+      value={orthostericSmiles}
+      onChange={(e) => setOrthostericSmiles(e.target.value)}
+      size="small"
+      fullWidth
+      sx={{ maxWidth: 520 }}
+    />
+
+    <Button
+      variant="outlined"
+      size="small"
+      onClick={() => smilesInputRef.current?.click()}
+      sx={{ maxWidth: 200, mt: 1 }}
+    >
+      Load SMILES (.smi)
+    </Button>
+  </>
+)}
+
+
 
           {/* Selected files under buttons */}
           <Box>
