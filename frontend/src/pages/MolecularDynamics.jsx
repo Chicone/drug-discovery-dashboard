@@ -18,6 +18,10 @@ function MolecularDynamics() {
   const [proteinFile, setProteinFile] = useState(null);
   const [runComment, setRunComment] = useState("");
   const [jobComment, setJobComment] = useState("");
+  const lastLogUpdateRef = useRef(Date.now());
+  const finishingRef = useRef(false);
+  const finishEmptyTicksRef = useRef(0);
+
 
 
   // Optional ligand inputs
@@ -64,6 +68,8 @@ function MolecularDynamics() {
 
   const [showFiles, setShowFiles] = useState(false);
 
+  const [lastLogUpdate, setLastLogUpdate] = useState(Date.now());
+
 
   // Persistent job locking
   const [lockedJobs, setLockedJobs] = useState(() => {
@@ -75,6 +81,7 @@ function MolecularDynamics() {
     }
     return new Set();
   });
+
 
   const presetsAll = useMemo(
     () => [
@@ -230,13 +237,16 @@ async function openJob(id) {
   setError(null);
   setSelectedParentJobId(id);
   setJobId(id);
-  setStatus("running");
 
   // Clear previous log
   logBufferRef.current = [];
   if (logRef.current) {
     logRef.current.textContent = "";
   }
+
+  finishingRef.current = false;
+  finishEmptyTicksRef.current = 0;
+  lastLogUpdateRef.current = Date.now();
 
   // 🔥 Start in tail mode
   logOffsetRef.current = 10 ** 15;
@@ -357,9 +367,8 @@ async function submitJob({ preset, workflow, parentJobId = null }) {
     }
 
     const data = await res.json();
-    setJobId(data.job_id);
-    setRunComment("");
-    setStatus("running");
+    openJob(data.job_id);
+
 
     // 🔥 Store build job ID
     if (workflow === "build_and_equilibrate" || workflow === "build_only") {
@@ -367,8 +376,6 @@ async function submitJob({ preset, workflow, parentJobId = null }) {
       localStorage.setItem("lastBuildJobId", data.job_id);
     }
 
-
-    pollJob(data.job_id);
     loadRecentJobs(historyLimit);
   } catch (e) {
     setError(e.message || String(e));
@@ -461,7 +468,13 @@ async function createRunJob() {
 
         if (chunk.length > 0) {
           appendLog(chunk);
+          lastLogUpdateRef.current = Date.now();
+          setLastLogUpdate(lastLogUpdateRef.current);
+          finishEmptyTicksRef.current = 0;
+        } else if (finishingRef.current) {
+          finishEmptyTicksRef.current += 1;
         }
+
 
         logOffsetRef.current = newOffset;
       }
@@ -475,13 +488,26 @@ async function createRunJob() {
       setError((prev) => prev || (e.message || String(e)));
     }
 
-    if (latestStatus === "done" || latestStatus === "error") {
+    const now = Date.now();
+    if (latestStatus === "running" && now - lastLogUpdateRef.current > 10000) {
+      setStatus("stalled");
+    }
 
+    const isFinished =
+      latestStatus === "done" || latestStatus === "error";
+
+    if (isFinished) {
+      finishingRef.current = true;
+    }
+
+    if (finishingRef.current && finishEmptyTicksRef.current >= 2) {
       if (pollTimerRef.current) {
         clearInterval(pollTimerRef.current);
         pollTimerRef.current = null;
       }
+      finishingRef.current = false;
     }
+
   }
 
   await tick();

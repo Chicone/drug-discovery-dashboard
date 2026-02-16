@@ -867,30 +867,43 @@ def get_job(job_id: str) -> dict | None:
 
     return data
 
-def read_log_window(job_id: str, offset: int, chunk_size: int):
+def read_log_window(job_id: str, offset: int, chunk_size: int, tail_bytes: int = 200_000):
     """
-    Implements the rolling-window log reader used by the old endpoint.
-
     Returns:
-        (content_bytes, new_offset, window_size)
-        or (None, 0, 0) if no log exists.
+      (content_bytes, new_offset, window_size)
+      or (None, 0, 0) if no log exists.
+
+    Behavior:
+      - Normal mode: read from window_start + offset
+      - Tail mode (offset > window_size): return only the last `tail_bytes` from the rolling window
     """
-    MAX_LOG_BYTES = 2_000_000  # exactly like old endpoint
+    MAX_LOG_BYTES = 2_000_000
 
     job_dir = _md_job_dir(job_id)
     log_path = job_dir / "log.txt"
-
     if not log_path.exists():
         return None, 0, 0
 
     file_size = log_path.stat().st_size
 
-    # Rolling window start
     window_start = max(0, file_size - MAX_LOG_BYTES)
-    window_size = file_size - window_start
+    window_size = file_size - window_start  # bytes available in rolling window
 
-    # Clamp offset
-    offset = min(offset, window_size)
+    # --- Tail mode: client asked for "from end" ---
+    if offset > window_size:
+        # choose start within rolling window
+        tail_bytes = max(1, min(tail_bytes, window_size))
+        start_in_window = max(0, window_size - tail_bytes)
+
+        with open(log_path, "rb") as f:
+            f.seek(window_start + start_in_window)
+            data = f.read(min(chunk_size, tail_bytes))
+
+        new_offset = start_in_window + len(data)
+        return data, new_offset, window_size
+
+    # --- Normal mode ---
+    offset = max(0, min(offset, window_size))
 
     with open(log_path, "rb") as f:
         f.seek(window_start + offset)
@@ -898,6 +911,7 @@ def read_log_window(job_id: str, offset: int, chunk_size: int):
 
     new_offset = offset + len(data)
     return data, new_offset, window_size
+
 
 def list_job_files(job_id: str):
     """
