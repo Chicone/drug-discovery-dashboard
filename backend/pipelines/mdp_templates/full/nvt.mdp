@@ -12,7 +12,8 @@ nsteps                  = 500000     ; 1.25 ns (adjust as needed)
 ; Velocity generation (replica diversification)
 gen_vel  = yes
 gen_temp = 310
-gen_seed = -1     ; new random seed every time
+gen_seed = 12345     ; same random seed every time
+;gen_seed = -1     ; new random seed every time
 
 ; ----- Temperature control -----
 tcoupl                  = v-rescale
