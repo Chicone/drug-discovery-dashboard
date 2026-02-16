@@ -206,6 +206,68 @@ def patch_small_beads(itp_path: Path):
     itp_path.write_text(text)
     print(f"[patch] Applied {changed} SC5→TC5 replacements to {itp_path}")
 
+def patch_virtual_site_masses(itp_path: Path):
+    """
+    Ensure all atoms defined in [virtual_sitesn]
+    have mass = 0 in the [atoms] section.
+    """
+
+    if not itp_path.exists():
+        raise FileNotFoundError(f"Missing ITP file: {itp_path}")
+
+    text = itp_path.read_text().splitlines()
+
+    # --- 1. Find virtual site indices ---
+    vs_indices = set()
+    in_vs = False
+
+    for line in text:
+        stripped = line.strip()
+        if stripped.startswith("[virtual_sites"):
+            in_vs = True
+            continue
+        if stripped.startswith("[") and not stripped.startswith("[virtual_sites"):
+            in_vs = False
+
+        if in_vs and stripped and not stripped.startswith(";"):
+            parts = stripped.split()
+            vs_indices.add(int(parts[0]))
+
+    if not vs_indices:
+        print("[patch] No virtual sites found.")
+        return
+
+    # --- 2. Patch masses in [atoms] ---
+    patched_lines = []
+    in_atoms = False
+    changes = 0
+
+    for line in text:
+        stripped = line.strip()
+
+        if stripped.startswith("[atoms]"):
+            in_atoms = True
+            patched_lines.append(line)
+            continue
+
+        if stripped.startswith("[") and not stripped.startswith("[atoms]"):
+            in_atoms = False
+
+        if in_atoms and stripped and not stripped.startswith(";"):
+            parts = line.split()
+            if len(parts) >= 8:
+                atom_id = int(parts[0])
+                if atom_id in vs_indices:
+                    if float(parts[7]) != 0.0:
+                        parts[7] = "0"
+                        line = "{:<6} {:<6} {:<4} {:<6} {:<6} {:<4} {:<6} {:<6}".format(*parts[:8])
+                        changes += 1
+
+        patched_lines.append(line)
+
+    itp_path.write_text("\n".join(patched_lines))
+    print(f"[patch] Set mass=0 for {changes} virtual site atoms in {itp_path}")
+
 
 from pathlib import Path
 
@@ -358,7 +420,11 @@ def step_martinize(cfg: PipelineConfig) -> PipelineConfig:
         "-x", cg_name,
         "-o", top_name,
         "-ff", "martini3001",
-        "-ss", "C",
+        "-dssp", "mkdssp",
+        # "-elastic",
+        # "-ef", "700",
+        # "-eu", "0.9",
+        # "-el", "0.5",
         "-name", cfg.protein_name,
         "-p", "backbone",
         "-pf", "1000",
@@ -402,9 +468,9 @@ def step_insane(cfg: PipelineConfig) -> None:
         # "-dm",  "0",
         "-ring",
         "-d", "1.2",
-        "-box", "14.0,14.0,20.0",
+        # "-box", "14.0,14.0,20.0",
         # "-box", "16.0,16.0,22.0",
-         # "-box","11.0,11.0,15.0",
+         "-box","12.0,12.0,15.0",
     ]
     run(cmd, cwd=cfg.workdir)
 
@@ -1269,6 +1335,7 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="AA oriented PDB inside workdir")
     p.add_argument("--orthosteric_pdb", default=None,
                    help="AA complex PDB (or ligand PDB) used to extract orthosteric ligand", )
+    p.add_argument("--orthosteric_smiles", type=str, default=None, help="SMILES string for orthosteric ligand")
 
     p.add_argument("--name", default="Protein",
                    help="Protein name used by martinize2/topology")
@@ -1428,7 +1495,7 @@ def main(argv=None) -> None:
         # Fresh ligand build
         from .ligand_cg_builder import build_ligand
 
-        SMILES_ORTHO = args.orthosteric_smiles
+        SMILES_ORTHO = getattr(args, "orthosteric_smiles", None)
 
         orth_cg = cfg.workdir / "orthosteric_cg.pdb"
         orth_itp = cfg.workdir / "Orthosteric.itp"
@@ -1471,6 +1538,7 @@ def main(argv=None) -> None:
 
         if orth_itp.exists():
             # patch_small_beads(orth_itp)
+            patch_virtual_site_masses(orth_itp)
             patch_ligand(
                 orth_itp,
                 bond_factor=1,

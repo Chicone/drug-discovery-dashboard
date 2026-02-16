@@ -15,15 +15,17 @@ function MolecularDynamics() {
   const proteinInputRef = useRef(null);
   const orthostericInputRef = useRef(null);
   const allostericInputRef = useRef(null);
-
   const [proteinFile, setProteinFile] = useState(null);
+  const [runComment, setRunComment] = useState("");
+  const [jobComment, setJobComment] = useState("");
+
 
   // Optional ligand inputs
   const [orthostericFile, setOrthostericFile] = useState(null);
   const [allostericPoseFile, setAllostericPoseFile] = useState(null);
 
-  // NECA default SMILES
-  const DEFAULT_SMILES = "CCNC(=O)[C@@H]1[C@H]([C@H]([C@@H](O1)N2C=NC3=C(N=CN=C32)N)O)O";
+  // cpd5 default SMILES
+  const DEFAULT_SMILES = "n1c(N2CCCCC2)c(C#N)c(c3ccccc3)c(C#N)c(N)1";
   const [orthostericSmiles, setOrthostericSmiles] = useState(DEFAULT_SMILES);
 
   const smilesInputRef = useRef(null);
@@ -33,7 +35,7 @@ function MolecularDynamics() {
 
   // Split presets: build vs run
   const [presetBuild, setPresetBuild] = useState("m3_popc_build");
-  const [presetRun, setPresetRun] = useState("m3_popc_eq");
+  const [presetRun, setPresetRun] = useState("m3_popc_full");
 
   const [jobId, setJobId] = useState(null);
   const [status, setStatus] = useState(null);
@@ -55,7 +57,7 @@ function MolecularDynamics() {
   const [selectedParentJobId, setSelectedParentJobId] = useState(null);
 
   const [lastBuildJobId, setLastBuildJobId] = useState(null);
-  const [mdDurationNs, setMdDurationNs] = useState(50);
+  const [mdDurationNs, setMdDurationNs] = useState(5);
   const [numThreads, setNumThreads] = useState(1);
 
   const logEndRef = useRef(null);
@@ -320,6 +322,9 @@ async function submitJob({ preset, workflow, parentJobId = null }) {
     form.append("workflow", workflow);
     form.append("md_ns", mdDurationNs);
     form.append("nt", numThreads);
+    if (runComment?.trim()) {
+      form.append("comment", runComment.trim());
+    }
 
     if (parentJobId) {
       form.append("parent_job_id", parentJobId);
@@ -353,6 +358,7 @@ async function submitJob({ preset, workflow, parentJobId = null }) {
 
     const data = await res.json();
     setJobId(data.job_id);
+    setRunComment("");
     setStatus("running");
 
     // 🔥 Store build job ID
@@ -435,6 +441,9 @@ async function createRunJob() {
           const s = await sRes.json();
           latestStatus = s.status;
           setStatus(latestStatus);
+          if (s.comment !== undefined) {
+              setJobComment(s.comment);
+          }
         }
 
       const lRes = await fetch(
@@ -752,7 +761,24 @@ return (
                 >
                   Allo
                 </Button>
-
+          {/* Selected files under buttons */}
+          <Box>
+            {proteinFile && (
+              <Typography variant="caption" sx={{ color: "#aaa", display: "block" }}>
+                PDB: {proteinFile.name}
+              </Typography>
+            )}
+            {orthostericFile && (
+              <Typography variant="caption" sx={{ color: "#aaa", display: "block" }}>
+                Ortho: {orthostericFile.name}
+              </Typography>
+            )}
+            {allostericPoseFile && (
+              <Typography variant="caption" sx={{ color: "#aaa", display: "block" }}>
+                Allo: {allostericPoseFile.name}
+              </Typography>
+            )}
+          </Box>
 
             <input
               ref={proteinInputRef}
@@ -792,6 +818,16 @@ return (
 
             {needsOrth && (
   <>
+        <Button
+      variant="outlined"
+      color="secondary"
+      size="small"
+      onClick={() => smilesInputRef.current?.click()}
+      sx={{ maxWidth: 200, mt: 1 }}
+    >
+      Load SMILES (.smi)
+    </Button>
+
     <TextField
       label={
         scenario === "ligand_water"
@@ -805,37 +841,12 @@ return (
       sx={{ maxWidth: 520 }}
     />
 
-    <Button
-      variant="outlined"
-      size="small"
-      onClick={() => smilesInputRef.current?.click()}
-      sx={{ maxWidth: 200, mt: 1 }}
-    >
-      Load SMILES (.smi)
-    </Button>
   </>
 )}
 
 
 
-          {/* Selected files under buttons */}
-          <Box>
-            {proteinFile && (
-              <Typography variant="caption" sx={{ color: "#aaa", display: "block" }}>
-                PDB: {proteinFile.name}
-              </Typography>
-            )}
-            {orthostericFile && (
-              <Typography variant="caption" sx={{ color: "#aaa", display: "block" }}>
-                Ortho: {orthostericFile.name}
-              </Typography>
-            )}
-            {allostericPoseFile && (
-              <Typography variant="caption" sx={{ color: "#aaa", display: "block" }}>
-                Allo: {allostericPoseFile.name}
-              </Typography>
-            )}
-          </Box>
+
 
 
 
@@ -920,6 +931,16 @@ return (
             >
               Run MD
             </Button>
+            <TextField
+              label="Run Comment"
+              fullWidth
+              multiline
+              rows={2}
+              value={runComment}
+              onChange={(e) => setRunComment(e.target.value)}
+              sx={{ mt: 2 }}
+            />
+
 
             <Button
               variant="outlined"
@@ -949,6 +970,12 @@ return (
           )}
 
           <Divider sx={{ borderColor: "#333" }} />
+
+          {jobComment && (
+            <Typography variant="body2" sx={{ color: "#ccc", mb: 1 }}>
+              Comment: {jobComment}
+            </Typography>
+          )}
 
           {/* Logs */}
           <Box>
