@@ -54,7 +54,9 @@ def create_md_job_service(
     md_ns,
     nt,
     orthosteric_ligand,
+    orthosteric_smiles,
     allosteric_pose,
+    comment=None,
 ):
     """
     This function contains EXACTLY the logic currently in md.py:create_md_job,
@@ -353,6 +355,7 @@ def create_md_job_service(
             "md_ns": md_ns,
             "start_gro": start_gro,
             "start_cpt": start_cpt,
+            "orthosteric_smiles": orthosteric_smiles,
             "gmx": {
                 "nt": int(nt),
                 "ntmpi": 1
@@ -362,6 +365,7 @@ def create_md_job_service(
                 "orthosteric_ligand": orth_path.name if orth_path else None,
                 "allosteric_pose": allo_path.name if allo_path else None,
             },
+            "comment": comment
         }
         _write_json(input_dir / "params.json", params)
 
@@ -618,7 +622,10 @@ def _launch_md_local(job_dir: Path) -> None:
     orth = params["files"].get("orthosteric_ligand")
     if orth:
         cmd += ["--orthosteric_pdb", str(input_dir / orth)]
-    # cmd = [sys.executable, "-m", module, "--job-dir", str(job_dir)]
+
+    orth_smiles = params.get("orthosteric_smiles")
+    if orth_smiles:
+        cmd += ["--orthosteric_smiles", orth_smiles]
 
     env = os.environ.copy()
     env["PYTHONPATH"] = str(PROJECT_ROOT)
@@ -846,6 +853,18 @@ def get_job(job_id: str) -> dict | None:
             pass
 
     data["status"] = status
+
+    # --- Load comment from params.json ---
+    params_json = job_dir / "input" / "params.json"
+    if params_json.exists():
+        try:
+            params = _read_json(params_json)
+            data["comment"] = params.get("comment", "")
+        except Exception:
+            data["comment"] = ""
+    else:
+        data["comment"] = ""
+
     return data
 
 def read_log_window(job_id: str, offset: int, chunk_size: int):

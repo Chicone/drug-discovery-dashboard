@@ -50,7 +50,9 @@ async def create_md_job(
     md_ns: Optional[float] = Form(None),
     nt: int = Form(1),
     orthosteric_ligand: Optional[UploadFile] = File(None),
+    orthosteric_smiles: str = Form(None),
     allosteric_pose: Optional[UploadFile] = File(None),
+    comment: Optional[str] = Form(None),
 ):
     return create_md_job_service(
         protein_pdb,
@@ -61,7 +63,9 @@ async def create_md_job(
         md_ns,
         nt,
         orthosteric_ligand,
+        orthosteric_smiles,
         allosteric_pose,
+        comment,
     )
 
 
