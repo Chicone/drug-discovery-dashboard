@@ -18,11 +18,8 @@ gen_seed = -1     ; new random seed every time
 ; ----- Temperature control -----
 tcoupl                  = v-rescale
 tc-grps                 = System
-tau-t                   = 2.0
-ref-t                   = 310
-;tc-grps                 = Protein ORT POPC W ION
-;tau-t                   = 2.0 2.0 2.0 2.0 2.0
-;ref-t                   = 310 310 310 310 310
+tau-t               = 1.0
+ref-t               = 310
 
 ; ----- Pressure control ------
 pcoupl                  = no        ; NVT only

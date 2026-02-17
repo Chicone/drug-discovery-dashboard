@@ -31,9 +31,9 @@ epsilon_rf          = 15
 
 ; Temperature coupling — separate groups
 tcoupl              = v-rescale
-tc-grps             = Protein ORT POPC W ION
-tau-t               = 1.0 1.0 1.0 1.0 1.0
-ref-t               = 310 310 310 310 310
+tc-grps             = System
+tau-t               = 1.0
+ref-t               = 310
 
 ; Pressure coupling — production quality
 pcoupl              = c-rescale          ; Better ensemble than Berendsen
