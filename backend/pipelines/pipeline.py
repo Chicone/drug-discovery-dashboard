@@ -776,6 +776,34 @@ def step_write_mdps(cfg: PipelineConfig, md_ns_override: Optional[float] = None)
     cp("npt.mdp", cfg.npt_mdp)
     cp("md.mdp",  cfg.md_mdp)
 
+    print("[pull] Adding simple COM restraint")
+
+    pull_block = """
+
+    ; ===== SIMPLE COM RESTRAINT =====
+    pull                    = yes
+    pull_ncoords            = 1
+    pull_ngroups            = 2
+    pull_group1_name        = ORT
+    pull_group2_name        = POCKET
+
+    pull_coord1_type        = umbrella
+    pull_coord1_geometry    = distance
+    pull_coord1_groups      = 1 2
+    pull_coord1_dim         = Y Y Y
+    pull_coord1_rate        = 0.0
+    pull_coord1_k           = 300
+    pull_coord1_start       = yes
+
+    pull_pbc_ref_prev_step_com = yes
+
+    """
+
+    for mdp in [cfg.nvt_mdp, cfg.npt_mdp, cfg.md_mdp]:
+        text = mdp.read_text()
+        mdp.write_text(text + pull_block)
+        print(f"[pull] Injected restraint into {mdp.name}")
+
     # -------------------------------------------------
     # Apply MD duration override (md_ns)
     # -------------------------------------------------
@@ -813,6 +841,7 @@ def step_grompp_mdrun_em(cfg: PipelineConfig, nt: int) -> None:
     must_exist(cfg.system_gro, "system.gro")
     must_exist(cfg.system_top, "system.top")
 
+    # center
     run(
         [
             "gmx",
@@ -840,10 +869,48 @@ def step_grompp_mdrun_em(cfg: PipelineConfig, nt: int) -> None:
 
     must_exist(cfg.workdir / f"{cfg.em_deffnm}.gro", "em.gro output")
 
+    # -------------------------------------------------
+    # Auto-recenter after EM (fix PBC before NVT)
+    # -------------------------------------------------
+
+
+    print("\n=== RECENTER AFTER EM ===")
+
+    em_gro = cfg.workdir / f"{cfg.em_deffnm}.gro"
+    em_tpr = cfg.workdir / f"{cfg.em_deffnm}.tpr"
+    centered = cfg.workdir / "em_centered.gro"
+
+    proc = subprocess.Popen(
+        [
+            "gmx", "trjconv",
+            "-f", str(em_gro),
+            "-s", str(em_tpr),
+            "-pbc", "mol",
+            "-center",
+            "-o", str(centered),
+        ],
+        cwd=str(cfg.workdir),
+        stdin=subprocess.PIPE,
+        text=True,
+    )
+
+    # Select System for centering and output
+    proc.communicate("0\n0\n")
+
+    must_exist(centered, "em_centered.gro")
+
+    print("[recenter] System reassembled and centered")
+
 
 def step_grompp_mdrun_nvt(cfg: PipelineConfig, nt: int) -> None:
     print("\n=== 8.1) NVT: grompp + mdrun ===")
-    c_in = cfg.workdir / f"{cfg.em_deffnm}.gro"
+    centered = cfg.workdir / "em_centered.gro"
+    if centered.exists():
+        c_in = centered
+    else:
+        c_in = cfg.workdir / f"{cfg.em_deffnm}.gro"
+
+    # c_in = cfg.workdir / f"{cfg.em_deffnm}.gro"
     must_exist(c_in, "em.gro input for NVT")
 
     run(
@@ -853,6 +920,7 @@ def step_grompp_mdrun_nvt(cfg: PipelineConfig, nt: int) -> None:
             "-c", str(c_in),
             "-r", str(c_in),
             "-p", str(cfg.system_top),
+            "-n", str(cfg.workdir / "index.ndx"),
             "-o", str(cfg.nvt_tpr),
         ],
         cwd=cfg.workdir,
@@ -920,6 +988,7 @@ def step_grompp_mdrun_npt(cfg: PipelineConfig, nt: int) -> None:
         "-c", str(gro_in),
         "-r", str(gro_in),
         "-p", str(cfg.system_top),
+        "-n", str(cfg.workdir / "index.ndx"),
         "-o", str(cfg.npt_tpr),
         "-maxwarn", "1",
     ]
@@ -1010,6 +1079,7 @@ def step_grompp_mdrun_md(cfg: PipelineConfig, nt: int) -> None:
         "-f", str(cfg.md_mdp),
         "-c", str(gro_in),
         "-p", str(cfg.system_top),
+        "-n", str(cfg.workdir / "index.ndx"),
         "-o", str(cfg.md_tpr),
         "-maxwarn", "1",
     ], cwd=workdir)
@@ -1265,6 +1335,38 @@ def cache_save_after_martinize(cfg, cache_dir: Path):
 
     print(f"[CACHE SAVED] Martinized complex stored in: {cache_dir}")
 
+def create_pull_index(cfg: PipelineConfig):
+    ndx = cfg.workdir / "index.ndx"
+
+    if ndx.exists():
+        ndx.unlink()
+
+    cmd = [
+        "gmx", "make_ndx",
+        "-f", str(cfg.system_gro),
+        "-o", str(ndx),
+    ]
+
+    commands = (
+        "r 168 & a BB | r 253 & a BB\n"
+        "name 19 POCKET\n"
+        "q\n"
+    )
+
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(cfg.workdir),
+        stdin=subprocess.PIPE,
+        text=True,
+    )
+
+    proc.communicate(commands)
+
+    if proc.returncode != 0:
+        raise RuntimeError("make_ndx failed")
+
+    print("[pull] POCKET group created")
+
 
 
 
@@ -1410,6 +1512,7 @@ def main(argv=None) -> None:
             print("[MD-only] Generated system.pdb for visualization.")
         else:
             print("[MD-only] WARNING: system.gro not found, could not create system.pdb.")
+
 
         # 3) Continue MD
         step_grompp_mdrun_md(cfg, nt=args.nt)
@@ -1598,6 +1701,8 @@ def main(argv=None) -> None:
 
     if not args.skip_ion_fix:
         step_fix_ions(cfg)
+
+    create_pull_index(cfg)
 
     if not args.skip_mdp_write:
         # Load MD duration override
