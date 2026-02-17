@@ -238,21 +238,38 @@ async function openJob(id) {
   setSelectedParentJobId(id);
   setJobId(id);
 
-  // Clear previous log
-  logBufferRef.current = [];
+  // Clear previous log UI
   if (logRef.current) {
-    logRef.current.textContent = "";
+    logRef.current.textContent = "… waiting for new log lines (tail mode) …\n";
   }
+
+  logBufferRef.current = [
+    "… waiting for new log lines (tail mode) …"
+  ];
 
   finishingRef.current = false;
   finishEmptyTicksRef.current = 0;
   lastLogUpdateRef.current = Date.now();
 
-  // 🔥 Start in tail mode
-  logOffsetRef.current = 10 ** 15;
+  // ✅ Proper tail initialization (NO 10**15)
+  try {
+    const res = await fetch(`/api/md/jobs/${id}/log?offset=0`);
+    await res.text(); // consume body (important)
+
+    const size = parseInt(
+      res.headers.get("X-Log-Size") || "0",
+      10
+    );
+
+    logOffsetRef.current = size;
+  } catch (e) {
+    console.error("Failed to initialize tail:", e);
+    logOffsetRef.current = 0;
+  }
 
   pollJob(id);
 }
+
 
   function workflowFromRunPreset(preset) {
     if (!preset.includes("_prod_")) {
@@ -261,26 +278,32 @@ async function openJob(id) {
     return "run_md";
   }
 
-  function appendLog(chunk) {
+function appendLog(chunk) {
   const el = logRef.current;
   if (!el || !chunk) return;
 
-  const MAX_LINES = 2000;
-
-  // 🔥 Trim trailing newline first
-  const cleaned = chunk.replace(/\n+$/, "");
-
+  const cleaned = chunk.replace(/\r/g, "");
   const newLines = cleaned.split("\n");
+
+  // Remove placeholder if present
+  if (
+    logBufferRef.current.length === 1 &&
+    logBufferRef.current[0].includes("waiting for new log lines")
+  ) {
+    logBufferRef.current = [];
+  }
+
   logBufferRef.current.push(...newLines);
 
+  const MAX_LINES = 2000;
   if (logBufferRef.current.length > MAX_LINES) {
-    logBufferRef.current =
-      logBufferRef.current.slice(-MAX_LINES);
+    logBufferRef.current = logBufferRef.current.slice(-MAX_LINES);
   }
 
   el.textContent = logBufferRef.current.join("\n");
   el.scrollTop = el.scrollHeight;
 }
+
 
 async function submitJob({ preset, workflow, parentJobId = null }) {
   setError(null);
@@ -488,10 +511,7 @@ async function createRunJob() {
       setError((prev) => prev || (e.message || String(e)));
     }
 
-    const now = Date.now();
-    if (latestStatus === "running" && now - lastLogUpdateRef.current > 10000) {
-      setStatus("stalled");
-    }
+
 
     const isFinished =
       latestStatus === "done" || latestStatus === "error";
@@ -1023,6 +1043,7 @@ return (
                 fontFamily: "monospace",
                 fontSize: "12px",
                 whiteSpace: "pre-wrap",
+                height: "260px",
                 maxHeight: "260px",
                 overflowY: "auto",
                 color: "#0f0",

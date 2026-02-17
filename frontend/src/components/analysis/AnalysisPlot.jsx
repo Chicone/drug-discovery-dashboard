@@ -48,56 +48,81 @@ export default function AnalysisPlot({ title = "Plot", plotData, plotMode, white
   // -----------------------------------------------------
   // Build AGGREGATE traces
   // -----------------------------------------------------
-  const buildAggregate = () => {
-    if (!plotData.aggregate) return [];
+    const buildAggregate = () => {
+      if (!plotData.aggregate) return [];
 
-    return [
-      {
-        x: x_ns,
-        y: plotData.aggregate.mean,
-        type: "scatter",
-        mode: "lines",
-        name: "Mean RMSD",
-      },
-      {
-        x: x_ns,
-        y: plotData.aggregate.min,
-        type: "scatter",
-        mode: "lines",
-        name: "Min",
-      },
-      {
-        x: x_ns,
-        y: plotData.aggregate.max,
-        type: "scatter",
-        mode: "lines",
-        name: "Max",
-      },
-    ];
-  };
+      const isCom = title.includes("COM");
+
+      return [
+        {
+          x: x_ns,
+          y: isCom
+            ? plotData.aggregate.mean.map(v => v * 10.0)
+            : plotData.aggregate.mean,
+          type: "scatter",
+          mode: "lines",
+          name: "Mean",
+        },
+        {
+          x: x_ns,
+          y: isCom
+            ? plotData.aggregate.min.map(v => v * 10.0)
+            : plotData.aggregate.min,
+          type: "scatter",
+          mode: "lines",
+          name: "Min",
+        },
+        {
+          x: x_ns,
+          y: isCom
+            ? plotData.aggregate.max.map(v => v * 10.0)
+            : plotData.aggregate.max,
+          type: "scatter",
+          mode: "lines",
+          name: "Max",
+        },
+      ];
+    };
 
   // -----------------------------------------------------
   // Build INDIVIDUAL traces (one per job)
   // -----------------------------------------------------
-  const buildIndividual = () => {
-    if (!plotData.replicas) return [];
-
+const buildIndividual = () => {
+  // Case 1: RMSD structured response
+  if (plotData.replicas) {
     return plotData.replicas.map((rep, idx) => {
       const dt = rep.timestep_ps ?? dt_ps;
+      const isCom = title.includes("COM");
+      const series = isCom ? rep.values : rep.rmsd;
       const x = rep.times_ps
-      ? rep.times_ps.map(t => t / 1000.0)
-      : rep.rmsd.map((_, i) => Number.isFinite(dt) ? (i * dt) / 1000.0 : i);
-
-
+        ? rep.times_ps.map((t) => t / 1000.0)
+        : series.map((_, i) =>
+          Number.isFinite(dt) ? (i * dt) / 1000.0 : i
+          );
       return {
         x,
-        y: rep.rmsd,
+        y: title.includes("COM")
+          ? rep.values.map(v => v * 10.0)
+          : rep.rmsd,
         type: "scatter",
         mode: "lines",
         name: rep.job_id || `Replica ${idx + 1}`,
       };
     });
-  };
+  }
+
+  // Case 2: COM raw dictionary { jobId: [values] }
+  return Object.entries(plotData)
+    .filter(([_, values]) => Array.isArray(values))
+    .map(([jobId, values]) => ({
+      x: values.map((_, i) => i),
+      y: values.map((v) => v * 10.0), // nm → Å
+      type: "scatter",
+      mode: "lines",
+      name: jobId,
+    }));
+};
+
 
   const traces =
     plotMode === "aggregate" ? buildAggregate() : buildIndividual();
@@ -120,10 +145,11 @@ export default function AnalysisPlot({ title = "Plot", plotData, plotMode, white
         <Plot
           data={traces}
           layout={{
-          title:
-            plotMode === "aggregate"
-              ? "Ligand RMSD — Aggregate"
-              : "Ligand RMSD — Individual Traces",
+            title:
+              plotMode === "aggregate"
+                ? `${title} — Aggregate`
+                : `${title} — Individual Traces`,
+
 
           // Switch styles depending on toggle:
           template: whiteBG ? "plotly_white" : undefined,
@@ -141,7 +167,12 @@ export default function AnalysisPlot({ title = "Plot", plotData, plotMode, white
           },
 
           yaxis: {
-            title: { text: "RMSD (Å)" },
+            title: {
+              text:
+                title.includes("COM")
+                  ? "COM Distance (Å)"
+                  : "RMSD (Å)",
+            },
             showline: true,
             linecolor: whiteBG ? "black" : "white",
           },
