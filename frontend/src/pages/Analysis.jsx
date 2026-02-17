@@ -24,9 +24,10 @@ export default function Analysis() {
 
   const [metric, setMetric] = useState("rmsd");
 
-
-console.log("plotData NOW:", plotData);
-
+  // orientation of ligand
+  const [orientationData, setOrientationData] = useState(null);
+  const [orientationLoading, setOrientationLoading] = useState(false);
+  const [orientationError, setOrientationError] = useState(null);
 
   // Fetch available MD jobs
   useEffect(() => {
@@ -36,18 +37,24 @@ console.log("plotData NOW:", plotData);
       .catch((e) => console.error("Failed to load MD jobs", e));
   }, []);
 
-const runAnalysis = async () => {
-  if (selectedJobs.length === 0) return;
+  const runAnalysis = async () => {
+    if (selectedJobs.length === 0) return;
 
   setLoading(true);
   setPlotData(null);
 
   const params = selectedJobs.map((j) => `job_ids=${j}`).join("&");
 
-  const endpoint =
-    metric === "rmsd"
-      ? "/api/analysis/ligand_rmsd"
-      : "/api/analysis/ligand_com_distance";
+  let endpoint;
+
+  if (metric === "rmsd") {
+    endpoint = "/api/analysis/ligand_rmsd";
+  } else if (metric === "com") {
+    endpoint = "/api/analysis/ligand_com_distance";
+  } else if (metric === "orientation") {
+    endpoint = "/api/analysis/ligand_orientation";
+  }
+
 
   try {
     const r = await fetch(`${endpoint}?${params}`);
@@ -70,7 +77,13 @@ const runAnalysis = async () => {
   return (
     <Paper sx={{ p: 3, background: "#1e1e1e", color: "white" }}>
         <Typography variant="h5" gutterBottom>
-          📈 {metric === "rmsd" ? "Ligand RMSD Analysis" : "Ligand–Pocket COM Analysis"}
+        📈 {
+          metric === "rmsd"
+            ? "Ligand RMSD Analysis"
+            : metric === "com"
+            ? "Ligand–Pocket COM Analysis"
+            : "Ligand Orientation Analysis"
+        }
         </Typography>
            <Box
           sx={{
@@ -108,7 +121,13 @@ const runAnalysis = async () => {
               disabled={selectedJobs.length === 0}
               sx={{ height: 56 }}
             >
-              {metric === "rmsd" ? "Compute RMSD" : "Compute COM"}
+            {
+              metric === "rmsd"
+                ? "Compute RMSD"
+                : metric === "com"
+                ? "Compute COM"
+                : "Compute Orientation"
+            }
             </Button>
           </Stack>
 
@@ -128,6 +147,7 @@ const runAnalysis = async () => {
             >
               <ToggleButton value="rmsd">RMSD</ToggleButton>
               <ToggleButton value="com">COM Distance</ToggleButton>
+              <ToggleButton value="orientation">Orientation</ToggleButton>
             </ToggleButtonGroup>
 
             <FormControl sx={{ minWidth: 200 }}>
@@ -160,19 +180,19 @@ const runAnalysis = async () => {
 
         </Box>
 
-    <AnalysisPlot
-      title={
-        metric === "rmsd"
-      ? "Ligand RMSD"
-      : "Ligand–Pocket COM Distance"
-    }
-
-        plotData={plotData}
-        plotMode={plotMode}
-        whiteBG={whiteBG}
-
-      />
-
+        <AnalysisPlot
+          title={
+            metric === "rmsd"
+              ? "Ligand RMSD"
+              : metric === "com"
+              ? "Ligand–Pocket COM Distance"
+              : "Ligand Orientation"
+          }
+          plotData={plotData}
+          plotMode={plotMode}
+          whiteBG={whiteBG}
+          metric={metric}
+        />
     </Paper>
   );
 }

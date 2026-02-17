@@ -9,6 +9,11 @@ from backend.services.analysis.distance import (
     compute_ligand_com_multi,
 )
 
+from backend.services.analysis.orientation import (
+    compute_ligand_orientation_multi,
+)
+
+
 router = APIRouter()
 
 @router.get("/ligand_rmsd")
@@ -55,3 +60,29 @@ def ligand_com_distance(
     job_dirs = [MD_RUNS_DIR / job_id for job_id in ids]
 
     return compute_ligand_com_multi(job_dirs)
+
+
+@router.get("/ligand_orientation")
+def ligand_orientation(
+    job_ids: list[str] = Query(
+        None,
+        description="Repeat job_ids=... or provide a single comma-separated value",
+    ),
+):
+
+    if not job_ids:
+        return {"error": "job_ids is required"}
+
+    ids: List[str] = []
+    for item in job_ids:
+        ids.extend([x.strip() for x in item.split(",") if x.strip()])
+
+    job_dirs = [MD_RUNS_DIR / job_id for job_id in ids]
+
+    # -----------------------------------------------------
+    # DEBUG: show exactly which directories are being used
+    # -----------------------------------------------------
+    print("DEBUG ligand_orientation(): job_ids parsed =", ids)
+    print("DEBUG ligand_orientation(): job_dirs =", job_dirs)
+
+    return compute_ligand_orientation_multi(job_dirs)

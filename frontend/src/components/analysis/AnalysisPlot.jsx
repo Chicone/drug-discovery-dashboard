@@ -3,7 +3,17 @@ import Plot from "react-plotly.js";
 import { Box, Typography } from "@mui/material";
 
 
-export default function AnalysisPlot({ title = "Plot", plotData, plotMode, whiteBG }) {
+export default function AnalysisPlot({
+  title = "Plot",
+  plotData,
+  plotMode,
+  whiteBG,
+  metric
+}) {
+
+  console.log("Metric:", metric);
+  console.log("PlotData:", plotData);
+
   // When no data yet
   if (!plotData) {
     return (
@@ -87,21 +97,39 @@ export default function AnalysisPlot({ title = "Plot", plotData, plotMode, white
   // -----------------------------------------------------
   // Build INDIVIDUAL traces (one per job)
   // -----------------------------------------------------
-const buildIndividual = () => {
-  // Case 1: RMSD structured response
+  const buildIndividual = () => {
+
+  // ----------------------------------------
+  // ORIENTATION MODE
+  // ----------------------------------------
+  if (metric === "orientation" && plotData.replicas) {
+  return plotData.replicas.map((rep, idx) => ({
+    x: rep.times_ns,
+    y: rep.angle_deg,
+    type: "scatter",
+    mode: "lines",
+    name: rep.job_id || `Replica ${idx + 1}`,
+  }));
+}
+
+  // ----------------------------------------
+  // RMSD STRUCTURED RESPONSE
+  // ----------------------------------------
   if (plotData.replicas) {
     return plotData.replicas.map((rep, idx) => {
       const dt = rep.timestep_ps ?? dt_ps;
       const isCom = title.includes("COM");
       const series = isCom ? rep.values : rep.rmsd;
+
       const x = rep.times_ps
         ? rep.times_ps.map((t) => t / 1000.0)
         : series.map((_, i) =>
-          Number.isFinite(dt) ? (i * dt) / 1000.0 : i
+            Number.isFinite(dt) ? (i * dt) / 1000.0 : i
           );
+
       return {
         x,
-        y: title.includes("COM")
+        y: isCom
           ? rep.values.map(v => v * 10.0)
           : rep.rmsd,
         type: "scatter",
@@ -111,12 +139,14 @@ const buildIndividual = () => {
     });
   }
 
-  // Case 2: COM raw dictionary { jobId: [values] }
+  // ----------------------------------------
+  // COM RAW DICTIONARY
+  // ----------------------------------------
   return Object.entries(plotData)
     .filter(([_, values]) => Array.isArray(values))
     .map(([jobId, values]) => ({
       x: values.map((_, i) => i),
-      y: values.map((v) => v * 10.0), // nm → Å
+      y: values.map((v) => v * 10.0),
       type: "scatter",
       mode: "lines",
       name: jobId,
@@ -124,8 +154,11 @@ const buildIndividual = () => {
 };
 
 
-  const traces =
-    plotMode === "aggregate" ? buildAggregate() : buildIndividual();
+const traces =
+  plotMode === "aggregate"
+    ? buildAggregate()
+    : buildIndividual();
+
 
   return (
     <Box sx={{ flex: 1, p: 2 }}>
@@ -169,9 +202,11 @@ const buildIndividual = () => {
           yaxis: {
             title: {
               text:
-                title.includes("COM")
-                  ? "COM Distance (Å)"
-                  : "RMSD (Å)",
+              metric === "orientation"
+                ? "Principal Axis Angle (deg)"
+                : title.includes("COM")
+                ? "COM Distance (Å)"
+                : "RMSD (Å)",
             },
             showline: true,
             linecolor: whiteBG ? "black" : "white",
