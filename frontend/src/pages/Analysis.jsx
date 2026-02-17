@@ -37,13 +37,25 @@ export default function Analysis() {
       .catch((e) => console.error("Failed to load MD jobs", e));
   }, []);
 
-  const runAnalysis = async () => {
-    if (selectedJobs.length === 0) return;
+const runAnalysis = async (forceMetric = metric) => {
+  if (selectedJobs.length === 0) return;
+
+  // Create deterministic cache key
+  const sortedJobs = [...selectedJobs].sort();
+  const cacheKey = `${forceMetric}::${sortedJobs.join(",")}`;
+
+  // --------------------------------------------------
+  // 1️⃣ Check cache first
+  // --------------------------------------------------
+  if (analysisCache[cacheKey]) {
+    console.log("Using cached result:", cacheKey);
+    setPlotData(analysisCache[cacheKey]);
+    return;
+  }
 
   setLoading(true);
-  setPlotData(null);
 
-  const params = selectedJobs.map((j) => `job_ids=${j}`).join("&");
+  const params = sortedJobs.map((j) => `job_ids=${j}`).join("&");
 
   let endpoint;
 
@@ -55,12 +67,20 @@ export default function Analysis() {
     endpoint = "/api/analysis/ligand_orientation";
   }
 
-
   try {
     const r = await fetch(`${endpoint}?${params}`);
     const json = await r.json();
 
     console.log("ANALYSIS RESULT:", json);
+
+    // --------------------------------------------------
+    // 2️⃣ Store in cache
+    // --------------------------------------------------
+    setAnalysisCache(prev => ({
+      ...prev,
+      [cacheKey]: json,
+    }));
+
     setPlotData(json);
   } catch (err) {
     console.error(err);
@@ -72,6 +92,26 @@ export default function Analysis() {
 
   const [plotMode, setPlotMode] = useState("individual");
   // "aggregate" | "individual"
+
+  const [analysisCache, setAnalysisCache] = useState({});
+
+
+useEffect(() => {
+  if (selectedJobs.length === 0) return;
+
+  const sortedJobs = [...selectedJobs].sort();
+  const cacheKey = `${metric}::${sortedJobs.join(",")}`;
+
+  // If cached → use it immediately
+  if (analysisCache[cacheKey]) {
+    console.log("Using cached result:", cacheKey);
+    setPlotData(analysisCache[cacheKey]);
+    return;
+  }
+
+  // Otherwise compute automatically
+  runAnalysis();
+}, [metric, selectedJobs]);
 
 
   return (
