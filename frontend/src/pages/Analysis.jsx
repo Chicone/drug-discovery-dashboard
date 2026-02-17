@@ -10,6 +10,8 @@ import {
   Select,
   FormControl,
   InputLabel,
+  ToggleButton,
+  ToggleButtonGroup
 } from "@mui/material";
 import AnalysisPlot from "../components/analysis/AnalysisPlot";
 
@@ -19,6 +21,8 @@ export default function Analysis() {
   const [plotData, setPlotData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [whiteBG, setWhiteBG] = useState(false);
+
+  const [metric, setMetric] = useState("rmsd");
 
 
 console.log("plotData NOW:", plotData);
@@ -32,7 +36,7 @@ console.log("plotData NOW:", plotData);
       .catch((e) => console.error("Failed to load MD jobs", e));
   }, []);
 
-const runRMSD = async () => {
+const runAnalysis = async () => {
   if (selectedJobs.length === 0) return;
 
   setLoading(true);
@@ -40,13 +44,17 @@ const runRMSD = async () => {
 
   const params = selectedJobs.map((j) => `job_ids=${j}`).join("&");
 
+  const endpoint =
+    metric === "rmsd"
+      ? "/api/analysis/ligand_rmsd"
+      : "/api/analysis/ligand_com_distance";
+
   try {
-    const r = await fetch(`/api/analysis/ligand_rmsd?${params}`);
+    const r = await fetch(`${endpoint}?${params}`);
     const json = await r.json();
 
-    console.log("RMSD RESULT:", json);
-
-    setPlotData(json);  // 👈 IMPORTANT
+    console.log("ANALYSIS RESULT:", json);
+    setPlotData(json);
   } catch (err) {
     console.error(err);
   }
@@ -54,75 +62,111 @@ const runRMSD = async () => {
   setLoading(false);
 };
 
-const [plotMode, setPlotMode] = useState("aggregate");
-// "aggregate" | "individual"
 
+  const [plotMode, setPlotMode] = useState("individual");
+  // "aggregate" | "individual"
 
 
   return (
     <Paper sx={{ p: 3, background: "#1e1e1e", color: "white" }}>
-      <Typography variant="h5" gutterBottom>
-        📈 Ligand RMSD Analysis
-      </Typography>
-
-      {/* Job selection */}
-      <Stack direction="row" spacing={2} sx={{ mt: 2, mb: 3 }}>
-        <FormControl sx={{ minWidth: 240 }}>
-          <InputLabel sx={{ color: "#ccc" }}>Select MD Jobs</InputLabel>
-          <Select
-            multiple
-            value={selectedJobs}
-            label="Select MD Jobs"
-            onChange={(e) => setSelectedJobs(e.target.value)}
-            sx={{ color: "white" }}
-          >
-            {jobs.map((j) => (
-              <MenuItem key={j.job_id} value={j.job_id}>
-                {j.job_id}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-
-        <Button
-          variant="contained"
-          color="secondary"
-          onClick={runRMSD}
-          disabled={selectedJobs.length === 0}
+        <Typography variant="h5" gutterBottom>
+          📈 {metric === "rmsd" ? "Ligand RMSD Analysis" : "Ligand–Pocket COM Analysis"}
+        </Typography>
+           <Box
+          sx={{
+            mt: 3,
+            mb: 4,
+            p: 3,
+            borderRadius: 2,
+            background: "#252525",
+          }}
         >
-          Compute RMSD
-        </Button>
-      </Stack>
 
-      <FormControl sx={{ minWidth: 200 }}>
-        <InputLabel sx={{ color: "#ccc" }}>Plot Mode</InputLabel>
-        <Select
-          value={plotMode}
-          label="Plot Mode"
-          onChange={(e) => setPlotMode(e.target.value)}
-          sx={{ color: "white" }}
-        >
-          <MenuItem value="aggregate">Aggregate (mean/min/max)</MenuItem>
-          <MenuItem value="individual">Individual traces</MenuItem>
-        </Select>
-      </FormControl>
+          {/* Row 1: Job select + button */}
+          <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 3 }}>
+            <FormControl sx={{ minWidth: 280 }}>
+              <InputLabel sx={{ color: "#ccc" }}>Select MD Jobs</InputLabel>
+              <Select
+                multiple
+                value={selectedJobs}
+                label="Select MD Jobs"
+                onChange={(e) => setSelectedJobs(e.target.value)}
+                sx={{ color: "white" }}
+              >
+                {jobs.map((j) => (
+                  <MenuItem key={j.job_id} value={j.job_id}>
+                    {j.job_id}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
 
-{/* White background toggle */}
-<Box sx={{ ml: 2, display: "flex", alignItems: "center" }}>
-  <label style={{ color: "white", cursor: "pointer" }}>
-    <input
-      type="checkbox"
-      checked={whiteBG}
-      onChange={() => setWhiteBG(!whiteBG)}
-      style={{ marginRight: 8 }}
-    />
-    White background (export)
-  </label>
-</Box>
+            <Button
+              variant="contained"
+              color="secondary"
+              onClick={runAnalysis}
+              disabled={selectedJobs.length === 0}
+              sx={{ height: 56 }}
+            >
+              {metric === "rmsd" ? "Compute RMSD" : "Compute COM"}
+            </Button>
+          </Stack>
 
+          {/* Row 2: Metric + Plot mode */}
+          <Stack direction="row" spacing={3} alignItems="center" sx={{ mb: 2 }}>
 
-      <AnalysisPlot
-        title="Ligand RMSD"
+            <ToggleButtonGroup
+              value={metric}
+              exclusive
+              onChange={(e, newValue) => {
+                if (newValue !== null) {
+                  setMetric(newValue);
+                  setPlotData(null);   // 🔥 CRITICAL
+                }
+              }}
+              size="small"
+            >
+              <ToggleButton value="rmsd">RMSD</ToggleButton>
+              <ToggleButton value="com">COM Distance</ToggleButton>
+            </ToggleButtonGroup>
+
+            <FormControl sx={{ minWidth: 200 }}>
+              <InputLabel sx={{ color: "#ccc" }}>Plot Mode</InputLabel>
+              <Select
+                value={plotMode}
+                label="Plot Mode"
+                onChange={(e) => setPlotMode(e.target.value)}
+                sx={{ color: "white" }}
+                size="small"
+              >
+                <MenuItem value="individual">Individual</MenuItem>
+                <MenuItem value="aggregate">Aggregate</MenuItem>
+              </Select>
+            </FormControl>
+
+            <Box sx={{ display: "flex", alignItems: "center" }}>
+              <label style={{ color: "#ccc", cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={whiteBG}
+                  onChange={() => setWhiteBG(!whiteBG)}
+                  style={{ marginRight: 8 }}
+                />
+                White export
+              </label>
+            </Box>
+
+          </Stack>
+
+        </Box>
+
+    <AnalysisPlot
+      title={
+        metric === "rmsd"
+      ? "Ligand RMSD"
+      : "Ligand–Pocket COM Distance"
+    }
+
         plotData={plotData}
         plotMode={plotMode}
         whiteBG={whiteBG}
