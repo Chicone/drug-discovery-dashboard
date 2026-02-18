@@ -18,6 +18,9 @@ from backend.services.md_jobs import (
 from backend.services.md_jobs import run_cgmd_setup_job
 from backend.services.md_helpers import MD_RUNS_DIR
 
+import subprocess
+
+
 # ------------------------------------------------------
 # Models
 # ------------------------------------------------------
@@ -195,7 +198,49 @@ def get_log(job_id: str, offset: int = 0):
         headers={"X-Log-Offset": str(offset + len(chunk))}
     )
 
+@router.post("/{job_id}/open-chimerax")
+def open_chimerax(job_id: str):
 
+    base = _md_job_dir(job_id)
+
+    topology = base / "out" / "system.pdb"
+    out_dir = base / "out"
+
+    if not topology.exists():
+        raise HTTPException(status_code=404, detail="Topology not found")
+
+    candidates = [
+        "md.xtc",
+        "md.part0001.xtc",
+        "npt.xtc",
+        "nvt.xtc",
+    ]
+
+    chosen = None
+    for name in candidates:
+        p = out_dir / name
+        if p.exists() and p.stat().st_size > 0:
+            chosen = p
+            break
+
+    if chosen is None:
+        raise HTTPException(status_code=404, detail="No trajectory file found")
+
+    from pathlib import Path
+
+    script = Path("~/PyCharm/ddd/backend/data/chimera/view.cxc").expanduser()
+
+    subprocess.Popen([
+        "/Applications/ChimeraX-1.11.1.app/Contents/MacOS/ChimeraX",
+        str(topology),
+        str(script),
+        str(chosen)
+    ])
+
+    return {
+        "status": "launched",
+        "trajectory": chosen.name
+    }
 
 
 
