@@ -3,8 +3,6 @@
 ;   Purpose: stabilize fragile poses
 ; ================================
 
-define                  =
-
 integrator              = md
 dt                      = 0.0025      ; ultra-safe: 2 fs
 nsteps                  = 500000     ; 1.25 ns (adjust as needed)
@@ -33,7 +31,8 @@ define                 = -DPOSRES
 pbc                     = xyz
 
 ; ----- Cutoffs (Martini 3 defaults) -----
-coulombtype             = cutoff
+coulombtype             = reaction-field
+epsilon_rf              = 15
 rcoulomb                = 1.1
 vdw-type                = cutoff
 rvdw                    = 1.1

@@ -21,11 +21,11 @@ cutoff-scheme       = Verlet
 nstlist             = 20
 rlist               = 1.1
 rvdw                = 1.1
-rcoulomb            = 1.1
 
 ; Electrostatics (Martini 3)
 coulomb-type        = reaction-field
 epsilon_rf          = 15
+rcoulomb            = 1.1
 
 ; Temperature coupling
 tcoupl              = v-rescale

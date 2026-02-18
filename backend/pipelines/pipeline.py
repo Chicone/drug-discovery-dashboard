@@ -420,7 +420,6 @@ def step_martinize(cfg: PipelineConfig) -> PipelineConfig:
         "-x", cg_name,
         "-o", top_name,
         "-ff", "martini3001",
-        "-dssp", "mkdssp",
         "-elastic",
         "-ef", "700",
         "-eu", "0.9",
@@ -463,7 +462,7 @@ def step_insane(cfg: PipelineConfig) -> None:
         "-p", str(cfg.system_top),
         "-l", "POPC",
         "-sol", "W",
-        "-salt", "0.02",
+        "-salt", "0.15",
         "-center",
         # "-dm",  "0",
         "-ring",
@@ -787,22 +786,23 @@ def step_write_mdps(cfg: PipelineConfig, md_ns_override: Optional[float] = None)
     pull_group1_name        = ORT
     pull_group2_name        = POCKET
 
-    pull_coord1_type        = umbrella
-    pull_coord1_geometry    = distance
-    pull_coord1_groups      = 1 2
-    pull_coord1_dim         = Y Y Y
-    pull_coord1_rate        = 0.0
-    pull_coord1_k           = 300
-    pull_coord1_start       = yes
+    pull_coord1_type  = flat-bottom
+    pull_coord1_geometry = distance
+    pull_coord1_groups = 1 2
+    pull_coord1_dim    = Y Y Y
+    pull_coord1_k      = 500
+    pull_coord1_kB     = 0
+    pull_coord1_init   = 0.58
+    pull_coord1_r0     = 0.25
 
     pull_pbc_ref_prev_step_com = yes
 
     """
 
-    for mdp in [cfg.nvt_mdp, cfg.npt_mdp, cfg.md_mdp]:
-        text = mdp.read_text()
-        mdp.write_text(text + pull_block)
-        print(f"[pull] Injected restraint into {mdp.name}")
+    # for mdp in [cfg.nvt_mdp, cfg.npt_mdp, cfg.md_mdp]:
+    #     text = mdp.read_text()
+    #     mdp.write_text(text + pull_block)
+    #     print(f"[pull] Injected restraint into {mdp.name}")
 
     # -------------------------------------------------
     # Apply MD duration override (md_ns)

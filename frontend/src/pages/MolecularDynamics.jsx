@@ -8,6 +8,7 @@ import {
   TextField,
   MenuItem,
   Divider,
+  Tooltip
 } from "@mui/material";
 
 
@@ -173,6 +174,9 @@ const needsAllo = useMemo(
     }
   }
 
+
+
+
   useEffect(() => {
     loadRecentJobs(historyLimit);
   }, [historyLimit]);
@@ -269,6 +273,21 @@ async function openJob(id) {
 
   pollJob(id);
 }
+
+async function openChimera(jobId) {
+  try {
+    const res = await fetch(`/api/md/${jobId}/open-chimerax`, {
+      method: "POST",
+    });
+
+    const data = await res.json();
+    console.log("Opened:", data.trajectory);
+  } catch (e) {
+    setError("Failed to launch ChimeraX");
+  }
+}
+
+
 
 
   function workflowFromRunPreset(preset) {
@@ -642,14 +661,14 @@ return (
               </Typography>
             </Stack>
         <Box
-          sx={{
-            border: "1px solid #333",
-            borderRadius: 1,
-            p: 1,
-            background: "#111",
-            maxHeight: 520,
-            overflowY: "auto",
-          }}
+                sx={{
+                  border: "1px solid #333",
+                  borderRadius: 1,
+                  p: 1,
+                  background: "#111",
+                  maxHeight: "70vh",
+                  overflowY: "auto",
+                }}
         >
           {recentJobs.length === 0 ? (
             <Typography variant="body2" sx={{ color: "#aaa" }}>
@@ -674,29 +693,77 @@ return (
                     }}
                   >
                     {/* Left: job info */}
-                    <Box onClick={() => openJob(j.job_id)}>
-                      <Typography variant="body2" sx={{ color: "#ddd" }}>
-                        {j.status || "?"} | {j.scenario || "md"} |{" "}
-                        {j.preset || "preset"}
-                      </Typography>
+                    <Box
+                      onClick={() => openJob(j.job_id)}
+                      sx={{
+                        flex: 1,
+                        minWidth: 0,
+                        overflow: "hidden",
+                      }}
+                    >
+                        <Tooltip
+                          title={`${j.status || "?"} | ${j.scenario || "md"} | ${j.preset || "preset"}`}
+                          arrow
+                        >
+                          <Typography
+                            variant="body2"
+                            sx={{
+                              color: "#ddd",
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              cursor: "default",
+                            }}
+                          >
+                            {j.status || "?"} | {j.scenario || "md"} | {j.preset || "preset"}
+                          </Typography>
+                        </Tooltip>
 
-                      <Typography
-                        variant="body2"
-                        sx={{
-                          fontFamily: "monospace",
-                          fontSize: "0.75rem",
-                          fontWeight: 600,
-                          color: "#66bb6a",
-                          letterSpacing: 0.5,
-                        }}
-                      >
-                      {j.job_id}
-                      </Typography>
+                        <Tooltip title={j.job_id} arrow>
+                          <Typography
+                            variant="body2"
+                            sx={{
+                              fontFamily: "monospace",
+                              fontSize: "0.75rem",
+                              fontWeight: 600,
+                              color: "#66bb6a",
+                              letterSpacing: 0.5,
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              maxWidth: 180,   // adjust if needed
+                              cursor: "default",
+                            }}
+                          >
+                            {j.job_id}
+                          </Typography>
+                        </Tooltip>
+
 
                     </Box>
 
                     {/* Right: lock + delete */}
                     <Stack direction="row" spacing={1} alignItems="center">
+                      {/* Chimera launching button */}
+                      <Button
+                          size="small"
+                          variant="outlined"
+                          sx={{
+                            minWidth: 32,
+                            padding: "2px 6px",
+                            borderColor: "#555",
+                            color: "#66bb6a",
+                            "&:hover": { borderColor: "#81c784" },
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openChimera(j.job_id);
+                          }}
+                        >
+                          🧬
+                        </Button>
+
+
                       <Button
                         size="small"
                         variant="outlined"
