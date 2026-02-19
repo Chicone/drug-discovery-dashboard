@@ -719,8 +719,10 @@ def _run_and_stream(
     last_energy = None
     last_temp = None
     last_pressure = None
-    catastrophic = False
-    trigger_line = None
+    last_step_line = None
+
+    fatal_detected = False
+    fatal_trigger_line = None
 
     assert proc.stdout is not None
 
@@ -740,50 +742,44 @@ def _run_and_stream(
 
         lower = line.lower()
 
-        # --- Catastrophic detectors ---
-        if (
-                "lincs warning" in lower
-                or "constraint error" in lower
-                or "bond length" in lower
-                or ("constraint" in lower and "violated" in lower)
-                or "pressure scaling more than" in lower
-                or re.search(r"\b(nan|inf)\b", lower)
-                or "can not fix pbc" in lower
-        ):
-            catastrophic = True
-            trigger_line = line
+        # Only detect real fatal error
+        if "fatal error" in lower:
+            fatal_detected = True
+            fatal_trigger_line = line
 
         # Write line to log
         _append_log(job_dir, line)
 
-        # If catastrophic event detected → stop immediately
-        if catastrophic:
-            _append_log(job_dir, "\n\n### FATAL MD ERROR DETECTED ###\n")
-            _append_log(job_dir, f"Trigger line:\n{trigger_line}\n")
-
-            if last_step_line:
-                _append_log(job_dir, f"\nLast step line:\n{last_step_line}\n")
-            if last_energy:
-                _append_log(job_dir, f"\nLast energy line:\n{last_energy}\n")
-            if last_temp:
-                _append_log(job_dir, f"\nLast temperature line:\n{last_temp}\n")
-            if last_pressure:
-                _append_log(job_dir, f"\nLast pressure line:\n{last_pressure}\n")
-
-            _append_log(job_dir, "\n--- Last 300 log lines before crash ---\n")
-            _append_log(job_dir, "".join(last_lines))
-            _append_log(job_dir, "\nStopping MD process group...\n")
-
-            try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-
-            RUNNING_JOBS.pop(job_id, None)
-            return 1
-
-    # Normal termination
+    # Process finished naturally
     code = proc.wait()
+
+    if code != 0:
+        _append_log(job_dir, "\n\n### MD TERMINATED WITH ERROR ###\n")
+        _append_log(job_dir, f"Return code: {code}\n")
+
+        if fatal_detected and fatal_trigger_line:
+            _append_log(job_dir, "\nFatal trigger line:\n")
+            _append_log(job_dir, fatal_trigger_line)
+
+        if last_step_line:
+            _append_log(job_dir, "\nLast step line:\n")
+            _append_log(job_dir, last_step_line)
+
+        if last_energy:
+            _append_log(job_dir, "\nLast energy line:\n")
+            _append_log(job_dir, last_energy)
+
+        if last_temp:
+            _append_log(job_dir, "\nLast temperature line:\n")
+            _append_log(job_dir, last_temp)
+
+        if last_pressure:
+            _append_log(job_dir, "\nLast pressure line:\n")
+            _append_log(job_dir, last_pressure)
+
+        _append_log(job_dir, "\n--- Last 300 log lines before termination ---\n")
+        _append_log(job_dir, "".join(last_lines))
+
     RUNNING_JOBS.pop(job_id, None)
     return code
 
