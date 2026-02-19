@@ -421,8 +421,11 @@ def step_martinize(cfg: PipelineConfig) -> PipelineConfig:
         "-o", top_name,
         "-ff", "martini3001",
         "-elastic",
-        "-ef", "700",
-        "-eu", "0.9",
+        # "-ef", "700",
+        # "-eu", "0.9",
+        # "-el", "0.5",
+        "-ef", "900",
+        "-eu", "1.0",
         "-el", "0.5",
         "-name", cfg.protein_name,
         "-p", "backbone",
@@ -462,14 +465,14 @@ def step_insane(cfg: PipelineConfig) -> None:
         "-p", str(cfg.system_top),
         "-l", "POPC",
         "-sol", "W",
-        "-salt", "0.15",
+        "-salt", "0.10",
         "-center",
         # "-dm",  "0",
         "-ring",
         "-d", "1.2",
-        # "-box", "14.0,14.0,20.0",
+        # "-box", "15.0,15.0,17.0",
         # "-box", "16.0,16.0,22.0",
-         "-box","12.0,12.0,15.0",
+        "-box","13.0,13.0,16.0",
     ]
     run(cmd, cwd=cfg.workdir)
 
@@ -785,16 +788,17 @@ def step_write_mdps(cfg: PipelineConfig, md_ns_override: Optional[float] = None)
     pull_ngroups            = 2
     pull_group1_name        = ORT
     pull_group2_name        = POCKET
-
-    pull_coord1_type  = flat-bottom
-    pull_coord1_geometry = distance
-    pull_coord1_groups = 1 2
-    pull_coord1_dim    = Y Y Y
-    pull_coord1_k      = 500
-    pull_coord1_kB     = 0
-    pull_coord1_init   = 0.58
-    pull_coord1_r0     = 0.25
-
+    
+    pull_coord1_type        = umbrella
+    pull_coord1_geometry    = distance
+    pull_coord1_geometry    = distance
+    pull_coord1_groups      = 1 2
+    pull_coord1_dim         = Y Y Y
+    pull_coord1_rate        = 0.0
+    pull_coord1_k           = 200
+    pull_coord1_init        = 0.58
+    pull_coord1_start       = no
+    
     pull_pbc_ref_prev_step_com = yes
 
     """
@@ -1368,6 +1372,106 @@ def create_pull_index(cfg: PipelineConfig):
     print("[pull] POCKET group created")
 
 
+import numpy as np
+
+def check_ligand_protein_clash_pdb(
+    pdb_path: Path,
+    ligand_resname: str = "ORT",
+    min_ok_nm: float = 0.35,
+    fail_nm: float = 0.30,
+) -> None:
+    """
+    Compute minimum distance between ligand beads (resname ORT) and protein
+    beads (all other residues) in a CG PDB.
+
+    Thresholds (Martini-ish):
+      - < fail_nm  : severe clash, likely EM failure
+      - < min_ok_nm: borderline, suspicious
+
+    Raises RuntimeError on severe clash. Prints diagnostics otherwise.
+    """
+
+    xs_l, xs_p = [], []
+    meta_l, meta_p = [], []
+
+    for line in pdb_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not (line.startswith("ATOM") or line.startswith("HETATM")):
+            continue
+
+        # PDB fixed columns
+        name = line[12:16].strip()
+        resn = line[17:20].strip()
+        chain = line[21].strip() or "A"
+        resid = int(line[22:26].strip() or "1")
+
+        try:
+            x = float(line[30:38])
+            y = float(line[38:46])
+            z = float(line[46:54])
+        except ValueError:
+            continue
+
+        if resn.upper() == ligand_resname.upper():
+            xs_l.append((x, y, z))
+            meta_l.append((name, resn, chain, resid))
+        else:
+            xs_p.append((x, y, z))
+            meta_p.append((name, resn, chain, resid))
+
+    if not xs_l:
+        print(f"[clash] No ligand beads with resname {ligand_resname} in {pdb_path}")
+        return
+    if not xs_p:
+        print(f"[clash] No protein beads found in {pdb_path}")
+        return
+
+    L = np.asarray(xs_l, dtype=np.float64)
+    P = np.asarray(xs_p, dtype=np.float64)
+
+    # PDB coords are in Å in most CG PDBs you write; confirm your writer.
+    # Your merge_cg_pdbs writes x,y,z as-is. Those came from martinize2 PDB,
+    # which is in nm or Å? martinize2 CG PDB is typically in nm? Actually PDB
+    # convention is Å, but many CG tools still output Å-like. So we must be
+    # explicit: we will estimate units by magnitude.
+    #
+    # Heuristic: if typical coordinate magnitude > 100 -> Å; else nm.
+    all_xyz = np.vstack([L, P])
+    span = np.max(all_xyz, axis=0) - np.min(all_xyz, axis=0)
+    span_max = float(np.max(span))
+
+    # If system spans more than ~30 units → almost certainly Å
+    in_angstrom = span_max > 30.0
+
+    # Compute min distance in same units as coordinates
+    dif = L[:, None, :] - P[None, :, :]
+    d2 = np.sum(dif * dif, axis=2)
+    i, j = np.unravel_index(np.argmin(d2), d2.shape)
+    d = float(np.sqrt(d2[i, j]))
+
+    # Convert to nm for reporting
+    d_nm = d * 0.1 if in_angstrom else d
+
+    lig_info = meta_l[i]
+    pro_info = meta_p[j]
+
+    msg = (
+        f"[clash] {pdb_path.name}: min ORT-protein distance = {d_nm:.3f} nm "
+        f"(coords in {'Å' if in_angstrom else 'nm'})\n"
+        f"        ligand:  {lig_info[0]} {lig_info[1]} {lig_info[2]}{lig_info[3]}\n"
+        f"        protein: {pro_info[0]} {pro_info[1]} {pro_info[2]}{pro_info[3]}\n"
+    )
+    print(msg)
+
+    if d_nm < fail_nm:
+        raise RuntimeError(
+            f"Severe ligand-protein clash detected: {d_nm:.3f} nm < {fail_nm} nm"
+        )
+    if d_nm < min_ok_nm:
+        print(
+            f"[clash] WARNING: borderline contact {d_nm:.3f} nm < {min_ok_nm} nm"
+        )
+
+
 
 
 # ------------------------------ Main ---------------------------------
@@ -1635,6 +1739,7 @@ def main(argv=None) -> None:
         # Save to cache since ligand was built now
         cache_save_after_martinize(cfg, cache_dir)
 
+
     elif args.orthosteric_pdb and SKIP_LIG:
         orth_itp = cfg.workdir / "Orthosteric.itp"
         orth_cg = cfg.workdir / "orthosteric_cg.pdb"
@@ -1673,6 +1778,15 @@ def main(argv=None) -> None:
             **cfg.__dict__,
             "orth_itp": None,
         })
+
+
+    check_ligand_protein_clash_pdb(
+        cfg.cg_pdb,
+        ligand_resname="ORT",
+        min_ok_nm=0.35,
+        fail_nm=0.30,
+    )
+
 
     # ===============================================================
     # 5) INSANE Build environment depending on scenario
@@ -1751,7 +1865,6 @@ def main(argv=None) -> None:
 
     # if args.do_md:
     #     step_grompp_mdrun_md(cfg, nt=args.nt)
-
     print("\nDONE.")
     print("Visualize with:")
     print("  vmd system.gro")

@@ -213,6 +213,7 @@ def open_chimerax(job_id: str):
         "md.xtc",
         "md.part0001.xtc",
         "npt.xtc",
+        "npt.part0001.xtc",
         "nvt.xtc",
     ]
 
