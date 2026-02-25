@@ -84,8 +84,10 @@ def compute_ligand_orientation_single(
 
     # Residue selections for contacts (by residue number in the topology)
     r1, r2 = ref_resids
-    r1_idx = top.select(f"protein and resid {r1}")
-    r2_idx = top.select(f"protein and resid {r2}")
+    r1_idx = top.select(f"protein and resSeq {r1}")
+    r2_idx = top.select(f"protein and resSeq {r2}")
+    # r1_idx = top.select(f"protein and resid {r1}")
+    # r2_idx = top.select(f"protein and resid {r2}")
 
     if r1_idx.size == 0:
         return {"error": f"No atoms for protein resid {r1} (check numbering)"}
@@ -136,7 +138,7 @@ def compute_ligand_orientation_single(
             axis=2,
         ).min()
         d2 = np.linalg.norm(
-            lig_xyz[i][:, None, :] - r2_xyz[i][None, :, :] - 0.0,
+            lig_xyz[i][:, None, :] - r2_xyz[i][None, :, :] ,
             axis=2,
         ).min()
         d168.append(float(d1))

@@ -56,6 +56,7 @@ def create_md_job_service(
     orthosteric_ligand,
     orthosteric_smiles,
     allosteric_pose,
+    ligand_case=None,
     comment=None,
 ):
     """
@@ -73,6 +74,9 @@ def create_md_job_service(
             status_code=400,
             content={"error": "Protein PDB required for this scenario"},
         )
+
+    if ligand_case is None:
+        ligand_case = "default"
 
     try:
         allowed_scenarios = {
@@ -338,6 +342,7 @@ def create_md_job_service(
             ),
             "orthosteric_extracted": orth_extracted,
             "orthosteric_extract_summary": extract_summary,
+            "ligand_case": ligand_case,
         }
 
         _write_json(job_dir / "run.json", run_record)
@@ -356,6 +361,7 @@ def create_md_job_service(
             "start_gro": start_gro,
             "start_cpt": start_cpt,
             "orthosteric_smiles": orthosteric_smiles,
+            "ligand_case": ligand_case,
             "gmx": {
                 "nt": int(nt),
                 "ntmpi": 1

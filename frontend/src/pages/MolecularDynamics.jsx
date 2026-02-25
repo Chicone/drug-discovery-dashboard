@@ -32,6 +32,7 @@ function MolecularDynamics() {
   // cpd5 default SMILES
   const DEFAULT_SMILES = "n1c(N2CCCCC2)c(C#N)c(c3ccccc3)c(C#N)c(N)1";
   const [orthostericSmiles, setOrthostericSmiles] = useState(DEFAULT_SMILES);
+  const [ligandCase, setLigandCase] = useState("default");
 
   const smilesInputRef = useRef(null);
 
@@ -327,6 +328,8 @@ function appendLog(chunk) {
 async function submitJob({ preset, workflow, parentJobId = null }) {
   setError(null);
 
+  const form = new FormData();
+
   // Protein required unless ligand-only
   if (needsProtein && !proteinFile) {
     setError("Protein PDB required for this scenario.");
@@ -352,6 +355,11 @@ async function submitJob({ preset, workflow, parentJobId = null }) {
       );
       return;
     }
+
+    if (ligandCase) {
+      form.append("ligand_case", ligandCase);
+    }
+
   }
 
 
@@ -362,8 +370,6 @@ async function submitJob({ preset, workflow, parentJobId = null }) {
   setStatus("queued");
 
   try {
-
-    const form = new FormData();
 
     if (needsProtein) {
       form.append("protein_pdb", proteinFile);
@@ -445,6 +451,7 @@ async function createRunJob() {
 //     setError("A simulation is already running.");
 //     return;
 //   }
+
 
   const parentId = selectedParentJobId || lastBuildJobId;
 
@@ -572,8 +579,22 @@ async function createRunJob() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
+    // --- Detect ligand case from filename ---
+    // Examples:
+    //   zm241385.smi → ligand_case = "zm241385"
+    //   cpd28.smi    → ligand_case = "cpd28"
+    //   mylig.smi    → ligand_case = "mylig"
+    const name = file.name.toLowerCase();
 
+    const caseKey = name
+      .replace(/\.[^/.]+$/, "") // remove extension
+      .trim()
+      .replace(/\s/g, "_");     // replace spaces for safety
+
+    setLigandCase(caseKey || "default");
+
+    // --- Read SMILES ---
+    const reader = new FileReader();
     reader.onload = (event) => {
       const text = event.target.result || "";
       const lines = text
@@ -583,12 +604,7 @@ async function createRunJob() {
 
       if (lines.length === 0) return;
 
-      // Take first non-empty line
-      const firstLine = lines[0];
-
-      // If format is: SMILES  name
-      const smiles = firstLine.split(/\s+/)[0];
-
+      const smiles = lines[0].split(/\s+/)[0];
       setOrthostericSmiles(smiles);
     };
 
