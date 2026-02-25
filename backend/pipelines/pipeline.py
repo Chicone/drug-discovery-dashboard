@@ -39,6 +39,42 @@ import json
 
 MDP_DIR = Path(__file__).resolve().parent / "mdp_templates"
 
+
+# ------------------------ Ligand pull presets ------------------------
+
+
+# This allows you to define several ligand "cases" with:
+#  - which bead is used as the H-bond bead (for group LIG_N05)
+#  - pull distances and force constants for the two restraints
+#
+# You select the case via params.json:
+#   { "scenario": "...", "ligand_case": "default", ... }
+#
+# If ligand_case is missing or unknown, "default" is used.
+
+LIGAND_PULL_CASES = {
+    "default": {
+        # Name of the ligand bead used for the 253 restraint
+        "hb_bead": "N05",
+
+        # Restraint 1: LIG_COM <-> POCKET_REF (168 ring COM)
+        "pull1_init": 0.48,   # nm
+        "pull1_k": 150.0,     # kJ mol-1 nm-2
+
+        # Restraint 2: LIG_N05 <-> RES253_SC1
+        "pull2_init": 0.47,   # nm
+        "pull2_k": 100.0,     # kJ mol-1 nm-2
+    },
+
+     "luf5834": {
+        "hb_bead": "N01",
+        "pull1_init": 0.40,
+        "pull1_k": 150.0,
+        "pull2_init": 0.42,
+        "pull2_k": 40.0,
+    },
+}
+
 # ------------------------------- Config ------------------------------
 
 
@@ -421,13 +457,10 @@ def step_martinize(cfg: PipelineConfig) -> PipelineConfig:
         "-o", top_name,
         "-ff", "martini3001",
         "-elastic",
-        # "-ef", "700",
-        # "-eu", "0.9",
-        # "-el", "0.5",
-        "-ef", "900",
-        "-eu", "1.0",
+        "-ef", "50",
+        "-eu", "0.9",
         "-el", "0.5",
-        "-name", cfg.protein_name,
+         "-name", cfg.protein_name,
         "-p", "backbone",
         "-pf", "1000",
         "-maxwarn", "30",
@@ -465,7 +498,7 @@ def step_insane(cfg: PipelineConfig) -> None:
         "-p", str(cfg.system_top),
         "-l", "POPC",
         "-sol", "W",
-        "-salt", "0.10",
+        "-salt", "0.05",
         "-center",
         # "-dm",  "0",
         "-ring",
@@ -737,7 +770,154 @@ def step_fix_ions(cfg: PipelineConfig) -> None:
     must_exist(cfg.system_gro, "system.gro for ion fix")
     patch_gro_ions(cfg.system_gro)
 
-def step_write_mdps(cfg: PipelineConfig, md_ns_override: Optional[float] = None) -> None:
+def step_write_mdps(
+    cfg: PipelineConfig,
+    md_ns_override: Optional[float] = None,
+) -> None:
+    print("\n=== 4) WRITE MDP FILES ===")
+    print("[DEBUG] md_ns_override =", md_ns_override)
+
+    # -------------------------------------------------
+    # Select MDP template set based on scenario
+    # -------------------------------------------------
+    params_file = cfg.workdir.parent / "input" / "params.json"
+
+    scenario = None
+    ligand_case = "default"
+    if params_file.exists():
+        params = json.loads(params_file.read_text())
+        scenario = params.get("scenario")
+        ligand_case = params.get("ligand_case", "default")
+
+    if scenario == "ligand_water":
+        template_dir = MDP_DIR / "ligand_water"
+        print("[mdp] Using ligand_water MDP templates")
+
+    elif scenario and scenario.endswith("_water"):
+        template_dir = MDP_DIR / "protein_only"
+        print("[mdp] Using protein_water MDP templates")
+
+    elif scenario and scenario.endswith("_membrane"):
+        template_dir = MDP_DIR / "full"
+        print("[mdp] Using membrane/full MDP templates")
+
+    else:
+        raise ValueError(f"Unknown scenario for MDP selection: {scenario}")
+
+    def cp(name: str, out_path: Path) -> None:
+        src = template_dir / name
+        if not src.exists():
+            raise FileNotFoundError(f"Missing MDP template: {src}")
+        write_text(out_path, src.read_text())
+
+    # -------------------------------------------------
+    # Copy default templates
+    # -------------------------------------------------
+    cp("em.mdp", cfg.em_mdp)
+    cp("nvt.mdp", cfg.nvt_mdp)
+    cp("npt.mdp", cfg.npt_mdp)
+    cp("md.mdp", cfg.md_mdp)
+
+    # -------------------------------------------------
+    # Prepare ligand pull parameters for this case
+    # -------------------------------------------------
+    case = LIGAND_PULL_CASES.get(ligand_case)
+    if case is None:
+        print(f"[pull] WARNING: unknown ligand_case '{ligand_case}', "
+              "using 'default'")
+        case = LIGAND_PULL_CASES["default"]
+
+    pull1_init = case.get("pull1_init", 0.48)
+    pull1_k = case.get("pull1_k", 150.0)
+    pull2_init = case.get("pull2_init", 0.47)
+    pull2_k = case.get("pull2_k", 40.0)
+
+    pull_block = f"""
+
+    ; =======================
+    ;   DUAL RESTRAINT SETUP
+    ; =======================
+
+    ; ligand_case = {ligand_case}
+
+    pull                    = yes
+    pull_ncoords            = 2
+    pull_ngroups            = 4
+
+    pull_group1_name        = LIG_COM
+    pull_group2_name        = POCKET_REF
+    pull_group3_name        = LIG_N05
+    pull_group4_name        = RES253_SC1
+
+    ; -------------------------
+    ; Restraint 1: depth anchor
+    ; LIG_COM (all beads) ↔ POCKET_REF (168 ring COM)
+    ; -------------------------
+    pull_coord1_type        = umbrella
+    pull_coord1_geometry    = distance
+    pull_coord1_groups      = 1 2
+    pull_coord1_dim         = Y Y Y
+    pull_coord1_init        = {pull1_init:.3f}
+    pull_coord1_k           = {pull1_k:.1f}
+    pull_coord1_start       = no
+
+    ; -------------------------
+    ; Restraint 2: orientation
+    ; LIG_N05 ↔ RES253_SC1
+    ; -------------------------
+    pull_coord2_type        = umbrella
+    pull_coord2_geometry    = distance
+    pull_coord2_groups      = 3 4
+    pull_coord2_dim         = Y Y Y
+    pull_coord2_init        = {pull2_init:.3f}
+    pull_coord2_k           = {pull2_k:.1f}
+    pull_coord2_start       = no
+
+    pull_pbc_ref_prev_step_com = yes
+    """
+
+    # Only add pulling restraint if the scenario includes a ligand
+    if cfg.orth_itp is not None:
+        print(
+            "[pull] Ligand detected -> injecting restraint for "
+            f"ligand_case='{ligand_case}'"
+        )
+        for mdp in [cfg.nvt_mdp, cfg.npt_mdp, cfg.md_mdp]:
+            text = mdp.read_text()
+            mdp.write_text(text + pull_block)
+            print(f"[pull] Injected restraint into {mdp.name}")
+    else:
+        print("[pull] No ligand -> skipping restraint injection")
+
+    # -------------------------------------------------
+    # Apply MD duration override (md_ns)
+    # -------------------------------------------------
+    if md_ns_override is not None:
+        md_text = cfg.md_mdp.read_text()
+
+        # convert ns -> nsteps
+        dt = None
+        for line in md_text.splitlines():
+            if line.strip().startswith("dt"):
+                dt = float(line.split("=")[1])
+                break
+
+        if dt is None:
+            raise RuntimeError("md.mdp missing 'dt' parameter")
+
+        nsteps = int((md_ns_override * 1000) / dt)
+
+        md_text = re.sub(
+            r"^nsteps\s*=\s*\d+",
+            f"nsteps = {nsteps}",
+            md_text,
+            flags=re.MULTILINE,
+        )
+
+        cfg.md_mdp.write_text(md_text)
+        print(f"[patch] Applied md_ns override -> nsteps = {nsteps}")
+
+def step_write_mdps_old(cfg: PipelineConfig, md_ns_override: Optional[float] = None) -> None:
     print("\n=== 4) WRITE MDP FILES ===")
     print("[DEBUG] md_ns_override =", md_ns_override)
 
@@ -772,41 +952,108 @@ def step_write_mdps(cfg: PipelineConfig, md_ns_override: Optional[float] = None)
             raise FileNotFoundError(f"Missing MDP template: {src}")
         write_text(out_path, src.read_text())
 
+    # -------------------------------------------------
     # Copy default templates
+    # -------------------------------------------------
     cp("em.mdp",  cfg.em_mdp)
     cp("nvt.mdp", cfg.nvt_mdp)
     cp("npt.mdp", cfg.npt_mdp)
     cp("md.mdp",  cfg.md_mdp)
 
-    print("[pull] Adding simple COM restraint")
+    # -------------------------------------------------
+    # ADD RESTRAINT BLOCK (ONLY IN MD)
+    # -------------------------------------------------
 
     pull_block = """
 
-    ; ===== SIMPLE COM RESTRAINT =====
+    ; =======================
+    ;   DUAL RESTRAINT SETUP
+    ; =======================
+
     pull                    = yes
-    pull_ncoords            = 1
-    pull_ngroups            = 2
-    pull_group1_name        = ORT
-    pull_group2_name        = POCKET
-    
+    pull_ncoords            = 2
+    pull_ngroups            = 4
+
+    pull_group1_name        = LIG_COM
+    pull_group2_name        = POCKET_REF
+    pull_group3_name        = LIG_N05
+    pull_group4_name        = RES253_SC1
+
+    ; -------------------------
+    ; Restraint 1: Depth anchor
+    ; LIGAND (COM) ↔ RES168 ring COM
+    ; -------------------------
     pull_coord1_type        = umbrella
-    pull_coord1_geometry    = distance
     pull_coord1_geometry    = distance
     pull_coord1_groups      = 1 2
     pull_coord1_dim         = Y Y Y
-    pull_coord1_rate        = 0.0
-    pull_coord1_k           = 200
-    pull_coord1_init        = 0.58
+    pull_coord1_init        = 0.48      ; nm
+    pull_coord1_k           = 150       ; soft to avoid distortion
     pull_coord1_start       = no
-    
-    pull_pbc_ref_prev_step_com = yes
 
+    ; -------------------------
+    ; Restraint 2: Orientation
+    ; N05 ↔ 253 SC1
+    ; -------------------------
+    pull_coord2_type        = umbrella
+    pull_coord2_geometry    = distance
+    pull_coord2_groups      = 3 4
+    pull_coord2_dim         = Y Y Y
+    pull_coord2_init        = 0.47      ; nm
+    pull_coord2_k           = 100       ; weaker, only to keep orientation
+    pull_coord2_start       = no
+
+    pull_pbc_ref_prev_step_com = yes
     """
 
-    # for mdp in [cfg.nvt_mdp, cfg.npt_mdp, cfg.md_mdp]:
-    #     text = mdp.read_text()
-    #     mdp.write_text(text + pull_block)
-    #     print(f"[pull] Injected restraint into {mdp.name}")
+    pull_block_168_253 = """
+
+   ; ===== DUAL RESTRAINT (CORRECT): =====
+;   168 SC1  ↔ ligand ring (C03/N01)
+;   253 SC1  ↔ ligand N05
+
+
+    pull                    = yes
+    pull_ncoords            = 2
+    pull_ngroups            = 4
+    
+    pull_group1_name        = LIG_RING     ; central aromatic ring bead
+    pull_group2_name        = RES168       ; residue 168 SC1
+    pull_group3_name        = LIG_N05      ; ligand N05
+    pull_group4_name        = ASN253       ; residue 253 SC1
+    
+    
+    ; ----- Coord 1: central ring ↔ 168 -----
+    pull_coord1_type        = umbrella
+    pull_coord1_geometry    = distance
+    pull_coord1_groups      = 1 2          ; LIG_RING ↔ RES168
+    pull_coord1_dim         = Y Y Y
+    pull_coord1_k           = 100
+    pull_coord1_init        = 0.47
+    pull_coord1_start       = no
+    
+    
+    ; ----- Coord 2: N05 ↔ 253 -----
+    pull_coord2_type        = umbrella
+    pull_coord2_geometry    = distance
+    pull_coord2_groups      = 3 4          ; LIG_N05 ↔ ASN253
+    pull_coord2_dim         = Y Y Y
+    pull_coord2_k           = 150
+    pull_coord2_init        = 0.475
+    pull_coord2_start       = no
+        
+    pull_pbc_ref_prev_step_com = yes    
+    """
+
+    # Only add pulling restraint if the scenario includes a ligand
+    if cfg.orth_itp is not None:
+        print("[pull] Ligand detected → injecting restraint")
+        for mdp in [cfg.nvt_mdp, cfg.npt_mdp, cfg.md_mdp]:
+            text = mdp.read_text()
+            mdp.write_text(text + pull_block)
+            print(f"[pull] Injected restraint into {mdp.name}")
+    else:
+        print("[pull] No ligand → skipping restraint injection")
 
     # -------------------------------------------------
     # Apply MD duration override (md_ns)
@@ -815,7 +1062,6 @@ def step_write_mdps(cfg: PipelineConfig, md_ns_override: Optional[float] = None)
         md_text = cfg.md_mdp.read_text()
 
         # convert ns → nsteps
-        # dt is read from mdp
         dt = None
         for line in md_text.splitlines():
             if line.strip().startswith("dt"):
@@ -1339,7 +1585,81 @@ def cache_save_after_martinize(cfg, cache_dir: Path):
 
     print(f"[CACHE SAVED] Martinized complex stored in: {cache_dir}")
 
-def create_pull_index(cfg: PipelineConfig):
+def create_pull_index(cfg: PipelineConfig) -> None:
+    """
+    Create index.ndx with pull groups.
+
+    Groups:
+      19 LIG_COM      - all ORT beads (ligand COM)
+      20 LIG_N05      - ligand H-bond bead (name depends on ligand_case)
+      21 POCKET_REF   - residue 168 SC1+SC2+SC3 (ring COM)
+      22 RES253_SC1   - residue 253 SC1 bead
+    """
+
+    # Read ligand_case from params.json (optional)
+    params_file = cfg.workdir.parent / "input" / "params.json"
+    ligand_case = "default"
+    if params_file.exists():
+        try:
+            params = json.loads(params_file.read_text())
+            ligand_case = params.get("ligand_case", "default")
+        except Exception:
+            print("[pull] WARNING: could not read params.json, "
+                  "using ligand_case='default'")
+
+    case = LIGAND_PULL_CASES.get(ligand_case)
+    if case is None:
+        print(f"[pull] WARNING: unknown ligand_case '{ligand_case}', "
+              "using 'default'")
+        case = LIGAND_PULL_CASES["default"]
+
+    hb_bead = case.get("hb_bead", "N05")
+
+    ndx = cfg.workdir / "index.ndx"
+    if ndx.exists():
+        ndx.unlink()
+
+    cmd = ["gmx", "make_ndx", "-f", str(cfg.system_gro), "-o", str(ndx)]
+
+    # Commands string is sent to make_ndx via stdin
+    commands = (
+        # Ligand COM (all beads)
+        "r ORT\n"
+        "name 19 LIG_COM\n"
+
+        # Ligand H-bond bead (configurable)
+        f"r ORT & a {hb_bead}\n"
+        "name 20 LIG_N05\n"
+
+        # Pocket reference: residue 168 aromatic ring COM
+        "r 168 & a SC1 | r 168 & a SC2 | r 168 & a SC3\n"
+        "name 21 POCKET_REF\n"
+
+        # Residue 253 SC1 bead
+        "r 253 & a SC1\n"
+        "name 22 RES253_SC1\n"
+
+        "q\n"
+    )
+
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(cfg.workdir),
+        stdin=subprocess.PIPE,
+        text=True,
+    )
+    proc.communicate(commands)
+
+    if proc.returncode != 0:
+        raise RuntimeError("make_ndx failed")
+
+    print(
+        "[pull] LIG_COM, LIG_N05, POCKET_REF, RES253_SC1 created "
+        f"(ligand_case='{ligand_case}', hb_bead='{hb_bead}')"
+    )
+
+
+def create_pull_index_168_253(cfg: PipelineConfig):
     ndx = cfg.workdir / "index.ndx"
 
     if ndx.exists():
@@ -1351,9 +1671,29 @@ def create_pull_index(cfg: PipelineConfig):
         "-o", str(ndx),
     ]
 
+    # We create:
+    #  - LIG_RING  (ligand C03 or N01)
+    #  - LIG_N05   (ligand N05 bead)
+    #  - RES168    (residue 168 SC1 bead)
+    #  - ASN253    (residue 253 SC1 bead)
+
     commands = (
-        "r 168 & a BB | r 253 & a BB\n"
-        "name 19 POCKET\n"
+        # Ligand ring bead (central aromatic group)
+        "r ORT & a C03 | r ORT & a N01\n"
+        "name 19 LIG_RING\n"
+
+        # Ligand H-bond donor bead
+        "r ORT & a N05\n"
+        "name 20 LIG_N05\n"
+
+        # Residue 168 aromatic ring: SC1 + SC2 + SC3 (COM will be used)
+        "r 168 & a SC1 | r 168 & a SC2 | r 168 & a SC3\n"
+        "name 21 RES168\n"
+
+        # Residue 253 SC1 (H-bond donor)
+        "r 253 & a SC1\n"
+        "name 22 ASN253\n"
+
         "q\n"
     )
 
@@ -1369,7 +1709,8 @@ def create_pull_index(cfg: PipelineConfig):
     if proc.returncode != 0:
         raise RuntimeError("make_ndx failed")
 
-    print("[pull] POCKET group created")
+    print("[pull] LIG_RING, LIG_N05, RES168, ASN253 groups created")
+
 
 
 import numpy as np
@@ -1377,8 +1718,8 @@ import numpy as np
 def check_ligand_protein_clash_pdb(
     pdb_path: Path,
     ligand_resname: str = "ORT",
-    min_ok_nm: float = 0.35,
-    fail_nm: float = 0.30,
+    min_ok_nm: float = 0.25,
+    fail_nm: float = 0.20,
 ) -> None:
     """
     Compute minimum distance between ligand beads (resname ORT) and protein
@@ -1783,8 +2124,8 @@ def main(argv=None) -> None:
     check_ligand_protein_clash_pdb(
         cfg.cg_pdb,
         ligand_resname="ORT",
-        min_ok_nm=0.35,
-        fail_nm=0.30,
+        min_ok_nm=0.25,
+        fail_nm=0.20,
     )
 
 

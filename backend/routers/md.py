@@ -54,6 +54,7 @@ async def create_md_job(
     nt: int = Form(1),
     orthosteric_ligand: Optional[UploadFile] = File(None),
     orthosteric_smiles: str = Form(None),
+    ligand_case: str | None = Form(None),
     allosteric_pose: Optional[UploadFile] = File(None),
     comment: Optional[str] = Form(None),
 ):
@@ -68,6 +69,7 @@ async def create_md_job(
         orthosteric_ligand,
         orthosteric_smiles,
         allosteric_pose,
+        ligand_case,
         comment,
     )
 
