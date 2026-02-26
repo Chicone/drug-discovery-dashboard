@@ -86,3 +86,37 @@ def ligand_orientation(
     print("DEBUG ligand_orientation(): job_dirs =", job_dirs)
 
     return compute_ligand_orientation_multi(job_dirs)
+
+
+from typing import List
+
+from fastapi import HTTPException, Query
+
+from backend.services.analysis.activation import (
+    compute_activation_metrics_multi,
+)
+
+@router.get("/activation_metrics")
+def activation_metrics(
+    job_ids: List[str] = Query(..., description="MD job IDs"),
+    tm3_ic_resids: List[int] = Query(None),
+    tm6_ic_resids: List[int] = Query(None),
+    axis_x: float = 0.0,
+    axis_y: float = 0.0,
+    axis_z: float = 1.0,
+):
+    if not job_ids:
+        raise HTTPException(status_code=400, detail="No job_ids passed")
+
+    # Convert job IDs to MD run directories
+    job_dirs = [MD_RUNS_DIR / job_id for job_id in job_ids]
+
+    axis = (axis_x, axis_y, axis_z)
+
+    # The service layer will decide defaults if None
+    return compute_activation_metrics_multi(
+        traj_paths=job_dirs,
+        tm3_ic_resids=tm3_ic_resids,
+        tm6_ic_resids=tm6_ic_resids,
+        axis=axis,
+    )

@@ -40,13 +40,9 @@ export default function Analysis() {
 const runAnalysis = async (forceMetric = metric) => {
   if (selectedJobs.length === 0) return;
 
-  // Create deterministic cache key
   const sortedJobs = [...selectedJobs].sort();
   const cacheKey = `${forceMetric}::${sortedJobs.join(",")}`;
 
-  // --------------------------------------------------
-  // 1️⃣ Check cache first
-  // --------------------------------------------------
   if (analysisCache[cacheKey]) {
     console.log("Using cached result:", cacheKey);
     setPlotData(analysisCache[cacheKey]);
@@ -55,16 +51,19 @@ const runAnalysis = async (forceMetric = metric) => {
 
   setLoading(true);
 
-  const params = sortedJobs.map((j) => `job_ids=${j}`).join("&");
+  const params = sortedJobs
+    .map(j => `job_ids=${encodeURIComponent(j)}`)
+    .join("&");
 
   let endpoint;
-
-  if (metric === "rmsd") {
+  if (forceMetric === "rmsd") {
     endpoint = "/api/analysis/ligand_rmsd";
-  } else if (metric === "com") {
+  } else if (forceMetric === "com") {
     endpoint = "/api/analysis/ligand_com_distance";
-  } else if (metric === "orientation") {
+  } else if (forceMetric === "orientation") {
     endpoint = "/api/analysis/ligand_orientation";
+  } else if (forceMetric === "activation") {
+    endpoint = "/api/analysis/activation_metrics";
   }
 
   try {
@@ -73,9 +72,6 @@ const runAnalysis = async (forceMetric = metric) => {
 
     console.log("ANALYSIS RESULT:", json);
 
-    // --------------------------------------------------
-    // 2️⃣ Store in cache
-    // --------------------------------------------------
     setAnalysisCache(prev => ({
       ...prev,
       [cacheKey]: json,
@@ -118,11 +114,15 @@ useEffect(() => {
     <Paper sx={{ p: 3, background: "#1e1e1e", color: "white" }}>
         <Typography variant="h5" gutterBottom>
         📈 {
-          metric === "rmsd"
-            ? "Ligand RMSD Analysis"
-            : metric === "com"
-            ? "Ligand–Pocket COM Analysis"
-            : "Ligand Orientation Analysis"
+        metric === "rmsd"
+              ? "Ligand RMSD Analysis"
+              : metric === "com"
+              ? "Ligand–Pocket COM Analysis"
+              : metric === "orientation"
+              ? "Ligand Orientation Analysis"
+              : metric === "activation"
+              ? "Protein Activation Metrics"
+              : ""
         }
         </Typography>
            <Box
@@ -157,16 +157,20 @@ useEffect(() => {
             <Button
               variant="contained"
               color="secondary"
-              onClick={runAnalysis}
+              onClick={() => runAnalysis(metric)}
               disabled={selectedJobs.length === 0}
               sx={{ height: 56 }}
             >
             {
-              metric === "rmsd"
-                ? "Compute RMSD"
-                : metric === "com"
-                ? "Compute COM"
-                : "Compute Orientation"
+            metric === "rmsd"
+              ? "Compute RMSD"
+              : metric === "com"
+              ? "Compute COM"
+              : metric === "orientation"
+              ? "Compute Orientation"
+              : metric === "activation"
+              ? "Compute Activation Metrics"
+              : ""
             }
             </Button>
           </Stack>
@@ -188,6 +192,7 @@ useEffect(() => {
               <ToggleButton value="rmsd">RMSD</ToggleButton>
               <ToggleButton value="com">COM Distance</ToggleButton>
               <ToggleButton value="orientation">Orientation</ToggleButton>
+              <ToggleButton value="activation">Activation</ToggleButton>
             </ToggleButtonGroup>
 
             <FormControl sx={{ minWidth: 200 }}>
@@ -226,7 +231,9 @@ useEffect(() => {
               ? "Ligand RMSD"
               : metric === "com"
               ? "Ligand–Pocket COM Distance"
-              : "Ligand Orientation"
+              : metric === "orientation"
+              ? "Ligand Orientation"
+              : "Activation Metrics"
           }
           plotData={plotData}
           plotMode={plotMode}
