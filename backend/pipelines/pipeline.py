@@ -457,7 +457,7 @@ def step_martinize(cfg: PipelineConfig) -> PipelineConfig:
         "-o", top_name,
         "-ff", "martini3001",
         "-elastic",
-        "-ef", "50",
+        "-ef", "250",
         "-eu", "0.9",
         "-el", "0.5",
          "-name", cfg.protein_name,
