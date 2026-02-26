@@ -1,7 +1,7 @@
 ; MARTINI 3 — PRODUCTION RUN (GPCR)
 integrator          = md
-dt                  = 0.01
-nsteps              = 10000000     ; 1.0 μs (adjust as needed)
+dt                  = 0.02
+nsteps              = 5000000     ; 1.0 μs (adjust as needed)
 
 ; Velocity generation (replica diversification)
 gen_vel             = no
