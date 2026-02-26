@@ -9,18 +9,41 @@ import numpy as np
 
 
 def _pick_traj_file(job_dir: Path) -> Path:
-    for name in [
+    out_dir = job_dir / "out"
+
+    # Preferred files
+    preferred = [
         "md_nojump.xtc",
         "md_fit.xtc",
         "md_centered.xtc",
         "md_pbc.xtc",
         "md_unwrapped.xtc",
         "md.xtc",
-    ]:
-        p = job_dir / "out" / name
+    ]
+
+    # 1) Try standard filenames
+    for name in preferred:
+        p = out_dir / name
         if p.exists() and p.stat().st_size > 0:
             return p
-    raise FileNotFoundError("No trajectory found in job_dir/out/.")
+
+    # 2) Try continuation parts: md.partXXXX.xtc
+    import re
+
+    part_files = list(out_dir.glob("md.part*.xtc"))
+    if not part_files:
+        raise FileNotFoundError(
+            f"No trajectory found in {out_dir} "
+            "(none of standard names and no md.partXXXX.xtc)"
+        )
+
+    def part_index(path):
+        m = re.search(r"\.part(\d+)\.xtc", path.name)
+        return int(m.group(1)) if m else -1
+
+    latest_part = max(part_files, key=part_index)
+    print(f"[pick_traj] Using continuation trajectory: {latest_part.name}")
+    return latest_part
 
 
 def _detect_ligand_resname(system_gro: Path) -> str:
@@ -59,6 +82,7 @@ def compute_ligand_orientation_single(
       - ligand COM z (and relative to protein COM z)
       - contacts to residues 168 and 253 (distance min per frame)
     """
+
     system = job_dir / "out" / "system.gro"
     if not system.exists():
         return {"error": f"Missing file: {system}"}
@@ -73,6 +97,8 @@ def compute_ligand_orientation_single(
 
     t = md.load(str(traj_path), top=str(system))
     top = t.topology
+
+    timestep_ps = float(t.time[1] - t.time[0]) if t.n_frames > 1 else None
 
     lig_idx = top.select(f"resname {ligand_resname}")
     if lig_idx.size == 0:
@@ -154,6 +180,7 @@ def compute_ligand_orientation_single(
     return {
         "times_ns": times_ns,
         "angle_deg": angles,
+        "timestep_ps": timestep_ps,
         "lig_com_z_nm": lig_com_z,
         "lig_minus_prot_com_z_nm": lig_minus_prot_com_z,
         "d168_nm": d168,
@@ -213,6 +240,7 @@ def compute_ligand_orientation_multi(job_dirs):
                 "job_id": job_id,
                 "angle_deg": data["angle_deg"],
                 "times_ns": data["times_ns"],
+                "timestep_ps": data.get("timestep_ps"),  # ★ REQUIRED FIX ★
             }
             for job_id, data in results.items()
             if "angle_deg" in data
