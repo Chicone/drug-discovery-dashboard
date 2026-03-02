@@ -63,7 +63,7 @@ LIGAND_PULL_CASES = {
 
         # Restraint 2: LIG_N05 <-> RES253_SC1
         "pull2_init": 0.47,   # nm
-        "pull2_k": 100.0,     # kJ mol-1 nm-2
+        "pull2_k": 40.0,     # kJ mol-1 nm-2
     },
 
      "luf5834": {
@@ -72,6 +72,14 @@ LIGAND_PULL_CASES = {
         "pull1_k": 150.0,
         "pull2_init": 0.42,
         "pull2_k": 40.0,
+    },
+
+    "neca": {
+        "hb_bead": "N07",
+        "pull1_init": 0.315,
+        "pull1_k": 350.0,
+        "pull2_init": 0.40,
+        "pull2_k": 150.0,
     },
 }
 
@@ -832,6 +840,8 @@ def step_write_mdps(
     pull2_init = case.get("pull2_init", 0.47)
     pull2_k = case.get("pull2_k", 40.0)
 
+    hb_bead = case.get("hb_bead", "N05")
+
     pull_block = f"""
 
     ; =======================
@@ -846,7 +856,7 @@ def step_write_mdps(
 
     pull_group1_name        = LIG_COM
     pull_group2_name        = POCKET_REF
-    pull_group3_name        = LIG_N05
+    pull_group3_name        = LIG_{hb_bead}
     pull_group4_name        = RES253_SC1
 
     ; -------------------------
@@ -1589,14 +1599,14 @@ def create_pull_index(cfg: PipelineConfig) -> None:
     """
     Create index.ndx with pull groups.
 
-    Groups:
-      19 LIG_COM      - all ORT beads (ligand COM)
-      20 LIG_N05      - ligand H-bond bead (name depends on ligand_case)
-      21 POCKET_REF   - residue 168 SC1+SC2+SC3 (ring COM)
-      22 RES253_SC1   - residue 253 SC1 bead
+    Fixed to work for ANY ligand_case:
+      LIG_COM        = all ORT beads
+      LIG_<hb_bead>  = ligand-specific H-bond bead (N05, N07, N01…)
+      POCKET_REF     = 168 aromatic ring (SC1+SC2+SC3)
+      RES253_SC1     = residue 253 SC1 bead
     """
 
-    # Read ligand_case from params.json (optional)
+    # Read ligand_case from params.json
     params_file = cfg.workdir.parent / "input" / "params.json"
     ligand_case = "default"
     if params_file.exists():
@@ -1607,35 +1617,36 @@ def create_pull_index(cfg: PipelineConfig) -> None:
             print("[pull] WARNING: could not read params.json, "
                   "using ligand_case='default'")
 
+    # Retrieve ligand-specific hb_bead (N05, N01, N07…)
     case = LIGAND_PULL_CASES.get(ligand_case)
     if case is None:
-        print(f"[pull] WARNING: unknown ligand_case '{ligand_case}', "
-              "using 'default'")
+        print(f"[pull] WARNING: unknown ligand_case '{ligand_case}', using 'default'")
         case = LIGAND_PULL_CASES["default"]
 
-    hb_bead = case.get("hb_bead", "N05")
+    hb_bead = case.get("hb_bead", "N05")  # <- THIS IS THE ONLY VARIABLE YOU NEED
 
+    # Output .ndx
     ndx = cfg.workdir / "index.ndx"
     if ndx.exists():
         ndx.unlink()
 
     cmd = ["gmx", "make_ndx", "-f", str(cfg.system_gro), "-o", str(ndx)]
 
-    # Commands string is sent to make_ndx via stdin
+    # IMPORTANT: use LIG_<hb_bead> instead of hardcoded LIG_N05
     commands = (
-        # Ligand COM (all beads)
+        # 19: Ligand COM (all beads)
         "r ORT\n"
         "name 19 LIG_COM\n"
 
-        # Ligand H-bond bead (configurable)
+        # 20: Ligand H-bond bead (depends on ligand_case)
         f"r ORT & a {hb_bead}\n"
-        "name 20 LIG_N05\n"
+        f"name 20 LIG_{hb_bead}\n"
 
-        # Pocket reference: residue 168 aromatic ring COM
+        # 21: Residue 168 aromatic ring COM
         "r 168 & a SC1 | r 168 & a SC2 | r 168 & a SC3\n"
         "name 21 POCKET_REF\n"
 
-        # Residue 253 SC1 bead
+        # 22: Residue 253 SC1
         "r 253 & a SC1\n"
         "name 22 RES253_SC1\n"
 
@@ -1654,9 +1665,82 @@ def create_pull_index(cfg: PipelineConfig) -> None:
         raise RuntimeError("make_ndx failed")
 
     print(
-        "[pull] LIG_COM, LIG_N05, POCKET_REF, RES253_SC1 created "
+        f"[pull] LIG_COM, LIG_{hb_bead}, POCKET_REF, RES253_SC1 created "
         f"(ligand_case='{ligand_case}', hb_bead='{hb_bead}')"
     )
+
+# def create_pull_index(cfg: PipelineConfig) -> None:
+#     """
+#     Create index.ndx with pull groups.
+#
+#     Groups:
+#       19 LIG_COM      - all ORT beads (ligand COM)
+#       20 LIG_N05      - ligand H-bond bead (name depends on ligand_case)
+#       21 POCKET_REF   - residue 168 SC1+SC2+SC3 (ring COM)
+#       22 RES253_SC1   - residue 253 SC1 bead
+#     """
+#
+#     # Read ligand_case from params.json (optional)
+#     params_file = cfg.workdir.parent / "input" / "params.json"
+#     ligand_case = "default"
+#     if params_file.exists():
+#         try:
+#             params = json.loads(params_file.read_text())
+#             ligand_case = params.get("ligand_case", "default")
+#         except Exception:
+#             print("[pull] WARNING: could not read params.json, "
+#                   "using ligand_case='default'")
+#
+#     case = LIGAND_PULL_CASES.get(ligand_case)
+#     if case is None:
+#         print(f"[pull] WARNING: unknown ligand_case '{ligand_case}', "
+#               "using 'default'")
+#         case = LIGAND_PULL_CASES["default"]
+#
+#     hb_bead = case.get("hb_bead", "N05")
+#
+#     ndx = cfg.workdir / "index.ndx"
+#     if ndx.exists():
+#         ndx.unlink()
+#
+#     cmd = ["gmx", "make_ndx", "-f", str(cfg.system_gro), "-o", str(ndx)]
+#
+#     # Commands string is sent to make_ndx via stdin
+#     commands = (
+#         # Ligand COM (all beads)
+#         "r ORT\n"
+#         "name 19 LIG_COM\n"
+#
+#         # Ligand H-bond bead (configurable)
+#         f"r ORT & a {hb_bead}\n"
+#         "name 20 LIG_N05\n"
+#
+#         # Pocket reference: residue 168 aromatic ring COM
+#         "r 168 & a SC1 | r 168 & a SC2 | r 168 & a SC3\n"
+#         "name 21 POCKET_REF\n"
+#
+#         # Residue 253 SC1 bead
+#         "r 253 & a SC1\n"
+#         "name 22 RES253_SC1\n"
+#
+#         "q\n"
+#     )
+#
+#     proc = subprocess.Popen(
+#         cmd,
+#         cwd=str(cfg.workdir),
+#         stdin=subprocess.PIPE,
+#         text=True,
+#     )
+#     proc.communicate(commands)
+#
+#     if proc.returncode != 0:
+#         raise RuntimeError("make_ndx failed")
+#
+#     print(
+#         "[pull] LIG_COM, LIG_N05, POCKET_REF, RES253_SC1 created "
+#         f"(ligand_case='{ligand_case}', hb_bead='{hb_bead}')"
+#     )
 
 
 def create_pull_index_168_253(cfg: PipelineConfig):
