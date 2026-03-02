@@ -506,7 +506,7 @@ def step_insane(cfg: PipelineConfig) -> None:
         "-p", str(cfg.system_top),
         "-l", "POPC",
         "-sol", "W",
-        "-salt", "0.05",
+        "-salt", "0.001",
         "-center",
         # "-dm",  "0",
         "-ring",
@@ -1595,18 +1595,21 @@ def cache_save_after_martinize(cfg, cache_dir: Path):
 
     print(f"[CACHE SAVED] Martinized complex stored in: {cache_dir}")
 
+
 def create_pull_index(cfg: PipelineConfig) -> None:
     """
     Create index.ndx with pull groups.
 
-    Fixed to work for ANY ligand_case:
-      LIG_COM        = all ORT beads
-      LIG_<hb_bead>  = ligand-specific H-bond bead (N05, N07, N01…)
-      POCKET_REF     = 168 aromatic ring (SC1+SC2+SC3)
-      RES253_SC1     = residue 253 SC1 bead
+    We let make_ndx generate groups with its default names and
+    then patch the headers to:
+
+      [ LIG_COM ]       = all ORT beads
+      [ LIG_<hb_bead> ] = ligand-specific H-bond bead (N05, N07, N01…)
+      [ POCKET_REF ]    = 168 aromatic ring (SC1+SC2+SC3)
+      [ RES253_SC1 ]    = residue 253 SC1 bead
     """
 
-    # Read ligand_case from params.json
+    # --- read ligand_case / hb_bead from params.json ---
     params_file = cfg.workdir.parent / "input" / "params.json"
     ligand_case = "default"
     if params_file.exists():
@@ -1614,42 +1617,35 @@ def create_pull_index(cfg: PipelineConfig) -> None:
             params = json.loads(params_file.read_text())
             ligand_case = params.get("ligand_case", "default")
         except Exception:
-            print("[pull] WARNING: could not read params.json, "
-                  "using ligand_case='default'")
+            print(
+                "[pull] WARNING: could not read params.json, "
+                "using ligand_case='default'"
+            )
 
-    # Retrieve ligand-specific hb_bead (N05, N01, N07…)
     case = LIGAND_PULL_CASES.get(ligand_case)
     if case is None:
-        print(f"[pull] WARNING: unknown ligand_case '{ligand_case}', using 'default'")
+        print(
+            f"[pull] WARNING: unknown ligand_case '{ligand_case}', "
+            "using 'default'"
+        )
         case = LIGAND_PULL_CASES["default"]
 
-    hb_bead = case.get("hb_bead", "N05")  # <- THIS IS THE ONLY VARIABLE YOU NEED
+    hb_bead = case.get("hb_bead", "N05")
 
-    # Output .ndx
+    # --- run make_ndx to create the relevant groups ---
     ndx = cfg.workdir / "index.ndx"
     if ndx.exists():
         ndx.unlink()
 
     cmd = ["gmx", "make_ndx", "-f", str(cfg.system_gro), "-o", str(ndx)]
 
-    # IMPORTANT: use LIG_<hb_bead> instead of hardcoded LIG_N05
+    # We don't rely on 'name' any more; we only create groups with
+    # default auto-names, then patch the headers in a second pass.
     commands = (
-        # 19: Ligand COM (all beads)
-        "r ORT\n"
-        "name 19 LIG_COM\n"
-
-        # 20: Ligand H-bond bead (depends on ligand_case)
-        f"r ORT & a {hb_bead}\n"
-        f"name 20 LIG_{hb_bead}\n"
-
-        # 21: Residue 168 aromatic ring COM
+        "r ORT\n"  # ligand beads
+        f"r ORT & a {hb_bead}\n"  # ligand hb_bead (N05/N07/N01…)
         "r 168 & a SC1 | r 168 & a SC2 | r 168 & a SC3\n"
-        "name 21 POCKET_REF\n"
-
-        # 22: Residue 253 SC1
         "r 253 & a SC1\n"
-        "name 22 RES253_SC1\n"
-
         "q\n"
     )
 
@@ -1662,12 +1658,151 @@ def create_pull_index(cfg: PipelineConfig) -> None:
     proc.communicate(commands)
 
     if proc.returncode != 0:
-        raise RuntimeError("make_ndx failed")
+        raise RuntimeError("make_ndx failed in create_pull_index")
+
+    # --- patch the group names in index.ndx ---
+    patch_pull_group_names(ndx, hb_bead, ligand_case)
 
     print(
         f"[pull] LIG_COM, LIG_{hb_bead}, POCKET_REF, RES253_SC1 created "
         f"(ligand_case='{ligand_case}', hb_bead='{hb_bead}')"
     )
+
+def patch_pull_group_names(
+    ndx_path: Path,
+    hb_bead: str,
+    ligand_case: str,
+) -> None:
+    """
+    Rename auto-generated groups from make_ndx to the pull names:
+
+      [ ORT ]                           -> [ LIG_COM ]
+      [ ORT_&_<hb_bead> ]               -> [ LIG_<hb_bead> ]
+      [ r_168_&_SC1_r_168_&_SC2_r_168_&_SC3 ]
+                                        -> [ POCKET_REF ]
+      [ r_253_&_SC1 ]                   -> [ RES253_SC1 ]
+
+    We match by substring rather than exact full header to be robust
+    to minor spacing changes.
+    """
+
+    if not ndx_path.exists():
+        raise FileNotFoundError(f"index.ndx not found: {ndx_path}")
+
+    lines = ndx_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    out = []
+
+    for line in lines:
+        stripped = line.strip()
+
+        # ligand all beads
+        if stripped == "[ ORT ]":
+            out.append("[ LIG_COM ]")
+            continue
+
+        # ligand hb_bead (N05/N07/N01 etc.)
+        if (
+            stripped.startswith("[")
+            and "ORT_&_" in stripped
+            and hb_bead in stripped
+        ):
+            out.append(f"[ LIG_{hb_bead} ]")
+            continue
+
+        # pocket ref (168 ring)
+        if "r_168_&_SC1_r_168_&_SC2_r_168_&_SC3" in stripped:
+            out.append("[ POCKET_REF ]")
+            continue
+
+        # 253 sidechain bead
+        if "r_253_&_SC1" in stripped:
+            out.append("[ RES253_SC1 ]")
+            continue
+
+        out.append(line)
+
+    ndx_path.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+    # quick debug print
+    print("[pull] Patched index.ndx headers for pull groups")
+
+# def create_pull_index(cfg: PipelineConfig) -> None:
+#     """
+#     Create index.ndx with pull groups.
+#
+#     Fixed to work for ANY ligand_case:
+#       LIG_COM        = all ORT beads
+#       LIG_<hb_bead>  = ligand-specific H-bond bead (N05, N07, N01…)
+#       POCKET_REF     = 168 aromatic ring (SC1+SC2+SC3)
+#       RES253_SC1     = residue 253 SC1 bead
+#     """
+#
+#     # Read ligand_case from params.json
+#     params_file = cfg.workdir.parent / "input" / "params.json"
+#     ligand_case = "default"
+#     if params_file.exists():
+#         try:
+#             params = json.loads(params_file.read_text())
+#             ligand_case = params.get("ligand_case", "default")
+#         except Exception:
+#             print("[pull] WARNING: could not read params.json, "
+#                   "using ligand_case='default'")
+#
+#     # Retrieve ligand-specific hb_bead (N05, N01, N07…)
+#     case = LIGAND_PULL_CASES.get(ligand_case)
+#     if case is None:
+#         print(f"[pull] WARNING: unknown ligand_case '{ligand_case}', using 'default'")
+#         case = LIGAND_PULL_CASES["default"]
+#
+#     hb_bead = case.get("hb_bead", "N05")  # <- THIS IS THE ONLY VARIABLE YOU NEED
+#
+#     # Output .ndx
+#     ndx = cfg.workdir / "index.ndx"
+#     if ndx.exists():
+#         ndx.unlink()
+#
+#     cmd = ["gmx", "make_ndx", "-f", str(cfg.system_gro), "-o", str(ndx)]
+#
+#     # IMPORTANT: use LIG_<hb_bead> instead of hardcoded LIG_N05
+#     commands = (
+#         # 19: Ligand COM (all beads)
+#         "r ORT\n"
+#         "name 0 LIG_COM\n"
+#         # "name 19 LIG_COM\n"
+#
+#         # 20: Ligand H-bond bead (depends on ligand_case)
+#         f"r ORT & a {hb_bead}\n"
+#         f"name 0 LIG_{hb_bead}\n"
+#         # f"name 20 LIG_{hb_bead}\n"
+#
+#         # 21: Residue 168 aromatic ring COM
+#         "r 168 & a SC1 | r 168 & a SC2 | r 168 & a SC3\n"
+#         "name 0 POCKET_REF\n"
+#         # "name 21 POCKET_REF\n"
+#
+#         # 22: Residue 253 SC1
+#         "r 253 & a SC1\n"
+#         "name 0 RES253_SC1\n"
+#         # "name 22 RES253_SC1\n"
+#
+#         "q\n"
+#     )
+#
+#     proc = subprocess.Popen(
+#         cmd,
+#         cwd=str(cfg.workdir),
+#         stdin=subprocess.PIPE,
+#         text=True,
+#     )
+#     proc.communicate(commands)
+#
+#     if proc.returncode != 0:
+#         raise RuntimeError("make_ndx failed")
+#
+#     print(
+#         f"[pull] LIG_COM, LIG_{hb_bead}, POCKET_REF, RES253_SC1 created "
+#         f"(ligand_case='{ligand_case}', hb_bead='{hb_bead}')"
+#     )
 
 # def create_pull_index(cfg: PipelineConfig) -> None:
 #     """
