@@ -33,6 +33,7 @@ function MolecularDynamics() {
   const DEFAULT_SMILES = "n1c(N2CCCCC2)c(C#N)c(c3ccccc3)c(C#N)c(N)1";
   const [orthostericSmiles, setOrthostericSmiles] = useState(DEFAULT_SMILES);
   const [ligandCase, setLigandCase] = useState("default");
+  const [smilesFileName, setSmilesFileName] = useState(null);
 
   const smilesInputRef = useRef(null);
 
@@ -576,41 +577,36 @@ async function createRunJob() {
   }
 
   function onPickSmilesFile(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const file = e.target.files?.[0];
+  if (!file) return;
 
-    // --- Detect ligand case from filename ---
-    // Examples:
-    //   zm241385.smi → ligand_case = "zm241385"
-    //   cpd28.smi    → ligand_case = "cpd28"
-    //   mylig.smi    → ligand_case = "mylig"
-    const name = file.name.toLowerCase();
+  setSmilesFileName(file.name);
 
-    const caseKey = name
-      .replace(/\.[^/.]+$/, "") // remove extension
-      .trim()
-      .replace(/\s/g, "_");     // replace spaces for safety
+  const name = file.name.toLowerCase();
 
-    setLigandCase(caseKey || "default");
+  const caseKey = name
+    .replace(/\.[^/.]+$/, "")
+    .trim()
+    .replace(/\s/g, "_");
 
-    // --- Read SMILES ---
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const text = event.target.result || "";
-      const lines = text
-        .split(/\r?\n/)
-        .map((l) => l.trim())
-        .filter(Boolean);
+  setLigandCase(caseKey || "default");
 
-      if (lines.length === 0) return;
+  const reader = new FileReader();
+  reader.onload = (event) => {
+    const text = event.target.result || "";
+    const lines = text
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
 
-      const smiles = lines[0].split(/\s+/)[0];
-      setOrthostericSmiles(smiles);
-    };
+    if (lines.length === 0) return;
 
-    reader.readAsText(file);
-  }
+    const smiles = lines[0].split(/\s+/)[0];
+    setOrthostericSmiles(smiles);
+  };
 
+  reader.readAsText(file);
+}
 
   const canSubmit =
     (!needsProtein || !!proteinFile) &&
@@ -947,15 +943,34 @@ return (
 
             {needsOrth && (
   <>
-        <Button
-      variant="outlined"
-      color="secondary"
-      size="small"
-      onClick={() => smilesInputRef.current?.click()}
-      sx={{ maxWidth: 200, mt: 1 }}
+<Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1 }}>
+  <Button
+    variant="outlined"
+    color="secondary"
+    size="small"
+    onClick={() => smilesInputRef.current?.click()}
+    sx={{ maxWidth: 200 }}
+  >
+    Load SMILES (.smi)
+  </Button>
+
+  {smilesFileName && (
+    <Typography
+      variant="body2"
+      sx={{ color: "#aaa", fontSize: "0.8rem" }}
     >
-      Load SMILES (.smi)
-    </Button>
+      {smilesFileName}
+    </Typography>
+  )}
+</Stack>
+    {smilesFileName && (
+      <Typography
+        variant="caption"
+        sx={{ color: "#aaa", display: "block", mt: 0.5 }}
+      >
+        SMILES: {smilesFileName}
+      </Typography>
+    )}
 
     <TextField
       label={
