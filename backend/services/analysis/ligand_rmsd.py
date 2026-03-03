@@ -98,8 +98,7 @@ def compute_ligand_rmsd_single(job_dir: Path, ligand_resname="ORT"):
     )
 
     # Align entire trajectory using the frozen protein reference
-    t.superpose(ref_bb, atom_indices=backbone,
-                ref_atom_indices=list(range(len(backbone))))
+    t.superpose(t, 0, atom_indices=backbone)
 
     ligand_idx = t.topology.select(f"resname {ligand_resname}")
     if len(ligand_idx) == 0:
@@ -114,8 +113,8 @@ def compute_ligand_rmsd_single(job_dir: Path, ligand_resname="ORT"):
     import numpy as np
 
     coords0 = t.xyz[0, ligand_idx, :]  # (N, 3)
-    diff = t.xyz[:, ligand_idx, :] - coords0[None, :, :]  # (T, N, 3)
-    rmsd = np.sqrt(np.mean(np.sum(diff * diff, axis=2), axis=1)) * 10.0  # (T,), Å
+    diff = (t.xyz[:, ligand_idx, :] - coords0[None, :, :]) * 10.0
+    rmsd = np.sqrt((diff * diff).sum(axis=2).mean(axis=1))
 
     # Extract true per-frame times from MDTraj (ps)
     times_ps = t.time.astype(float).tolist()
