@@ -133,8 +133,163 @@ def aggregate_replicas_1d(
         "max": max_v.tolist(),
     }
 
+import mdtraj as md
+import numpy as np
+from typing import Iterable, List, Dict, Tuple
+
+
+# -------------------------
+# Default correct resSeq ranges for A2A AR IC tips
+# (You can override via parameters)
+# -------------------------
+A2A_TM3_DEFAULT = list(range(126, 136))   # around R3.50 (IC tip of TM3)
+A2A_TM6_DEFAULT = list(range(224, 236))   # around L6.30 (IC tip of TM6)
+
+
+# -------------------------
+# Helpers
+# -------------------------
+
+def _select_by_resSeq(top: md.Topology, resSeqs: Iterable[int]) -> np.ndarray:
+    resSeqs = set(resSeqs)
+    idx = [atom.index for atom in top.atoms if atom.residue.resSeq in resSeqs]
+    if not idx:
+        raise ValueError(f"No atoms found for resSeq values {resSeqs}")
+    return np.array(idx, dtype=int)
+
+
+def _mass_com(coords, masses):
+    total = masses.sum()
+    return (coords * masses[:, None]).sum(axis=0) / total
+
+
+def _axis_from_box(traj: md.Trajectory):
+    box = traj.unitcell_vectors.mean(axis=0)
+    lengths = np.linalg.norm(box, axis=1)
+    axis = box[np.argmin(lengths)]
+    axis = axis / np.linalg.norm(axis)
+    return axis
+
+
+# -------------------------
+# MAIN FUNCTION (same signature)
+# -------------------------
 
 def compute_activation_metrics_multi(
+    traj_paths,
+    tm3_ic_resids=None,
+    tm6_ic_resids=None,
+    axis=(0, 0, 1),
+):
+
+    results = []
+
+    for job_dir in traj_paths:
+        job_id = job_dir.name
+        out = job_dir / "out"
+
+        # topology
+        system = out / "npt.gro"
+        if not system.exists():
+            raise RuntimeError(f"[{job_id}] Missing npt.gro")
+
+        # detect trajectory
+        traj_file = None
+
+        parts = sorted(out.glob("md.part*.xtc"))
+        if parts:
+            traj_file = parts[-1]
+
+        if traj_file is None:
+            for name in [
+                "md_nojump.xtc", "md_centered.xtc", "md_fit.xtc",
+                "md_pbc.xtc", "md_unwrapped.xtc", "md.xtc",
+            ]:
+                p = out / name
+                if p.exists() and p.stat().st_size > 0:
+                    traj_file = p
+                    break
+
+        if traj_file is None:
+            raise RuntimeError(f"[{job_id}] No trajectory found in {out}")
+
+        print(f"[DEBUG] Loading {traj_file}")
+
+        traj = md.load(str(traj_file), top=str(system))
+        times_ps = traj.time.copy()
+
+        # Align on protein
+        prot_idx = traj.top.select("protein")
+        traj.superpose(traj, 0, atom_indices=prot_idx)
+
+        # Axis
+        if axis == (0, 0, 1):
+            axis_vec = _axis_from_box(traj)
+        else:
+            axis_vec = np.array(axis, dtype=float)
+            axis_vec /= np.linalg.norm(axis_vec)
+
+        print(f"[DEBUG] Axis used for {job_id}: {axis_vec}")
+
+        # Determine TM3/TM6 resSeq lists
+        tm3_res = tm3_ic_resids if tm3_ic_resids is not None else A2A_TM3_DEFAULT
+        tm6_res = tm6_ic_resids if tm6_ic_resids is not None else A2A_TM6_DEFAULT
+
+        print(f"[DEBUG] TM3 residues for {job_id}: {tm3_res}")
+        print(f"[DEBUG] TM6 residues for {job_id}: {tm6_res}")
+
+        # Select atoms (resSeq!)
+        tm3_idx = _select_by_resSeq(traj.top, tm3_res)
+        tm6_idx = _select_by_resSeq(traj.top, tm6_res)
+
+        masses = np.array([atom.element.mass for atom in traj.top.atoms])
+
+        # COM per frame
+        tm3_com = np.array([
+            _mass_com(traj.xyz[i, tm3_idx, :], masses[tm3_idx])
+            for i in range(traj.n_frames)
+        ])
+        tm6_com = np.array([
+            _mass_com(traj.xyz[i, tm6_idx, :], masses[tm6_idx])
+            for i in range(traj.n_frames)
+        ])
+
+        # IC distance
+        ic_dist = np.linalg.norm(tm6_com - tm3_com, axis=1)
+
+        # Displacement
+        disp = np.dot(tm6_com - tm6_com[0], axis_vec)
+
+        results.append({
+            "job_id": job_id,
+            "tm3_tm6_distance": ic_dist.tolist(),
+            "tm6_displacement": disp.tolist(),
+            "times_ps": times_ps.tolist(),
+            "timestep_ps": float(times_ps[1] - times_ps[0]) if traj.n_frames > 1 else 0.0,
+        })
+
+    # Aggregate
+    min_len = min(len(r["tm3_tm6_distance"]) for r in results)
+    dist = np.array([r["tm3_tm6_distance"][:min_len] for r in results])
+    disp = np.array([r["tm6_displacement"][:min_len] for r in results])
+
+    aggregate = {
+        "tm3_tm6_distance": {
+            "mean": dist.mean(axis=0).tolist(),
+            "min":  dist.min(axis=0).tolist(),
+            "max":  dist.max(axis=0).tolist(),
+        },
+        "tm6_displacement": {
+            "mean": disp.mean(axis=0).tolist(),
+            "min":  disp.min(axis=0).tolist(),
+            "max":  disp.max(axis=0).tolist(),
+        },
+    }
+
+    return {"replicas": results, "aggregate": aggregate}
+
+
+def compute_activation_metrics_multi_old(
     traj_paths,
     tm3_ic_resids=None,
     tm6_ic_resids=None,

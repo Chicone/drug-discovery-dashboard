@@ -37,13 +37,13 @@ export default function Analysis() {
       .catch((e) => console.error("Failed to load MD jobs", e));
   }, []);
 
-const runAnalysis = async (forceMetric = metric) => {
+const runAnalysis = async (forceMetric = metric, force = false) => {
   if (selectedJobs.length === 0) return;
 
   const sortedJobs = [...selectedJobs].sort();
   const cacheKey = `${forceMetric}::${sortedJobs.join(",")}`;
 
-  if (analysisCache[cacheKey]) {
+  if (!force && analysisCache[cacheKey]) {
     console.log("Using cached result:", cacheKey);
     setPlotData(analysisCache[cacheKey]);
     return;
@@ -157,7 +157,10 @@ useEffect(() => {
             <Button
               variant="contained"
               color="secondary"
-              onClick={() => runAnalysis(metric)}
+              onClick={() => {
+                  setPlotData(null);
+                  runAnalysis(metric, true);
+              }}
               disabled={selectedJobs.length === 0}
               sx={{ height: 56 }}
             >
@@ -184,7 +187,7 @@ useEffect(() => {
               onChange={(e, newValue) => {
                 if (newValue !== null) {
                   setMetric(newValue);
-                  setPlotData(null);   // 🔥 CRITICAL
+                  setPlotData(null);
                 }
               }}
               size="small"

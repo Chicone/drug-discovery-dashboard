@@ -7,6 +7,11 @@ from typing import Dict, List, Optional, Tuple
 import mdtraj as md
 import numpy as np
 
+LIGAND_CORE_BEADS = {
+    "neca": None,     # adenine / purine ring beads
+    "default": None,         # fallback: 3 heavy beads
+}
+
 
 def _pick_traj_file(job_dir: Path) -> Path:
     out_dir = job_dir / "out"
@@ -70,6 +75,19 @@ def _angle_deg(u: np.ndarray, v: np.ndarray) -> float:
     return float(np.degrees(np.arccos(c)))
 
 
+import json
+
+def load_ligand_case(job_dir: Path) -> str:
+    meta = job_dir / "run.json"
+    if not meta.exists():
+        return "default"
+    try:
+        with open(meta, "r") as f:
+            d = json.load(f)
+        return d.get("ligand_case", "default")
+    except Exception:
+        return "default"
+
 def compute_ligand_orientation_single(
     job_dir: Path,
     ligand_resname: Optional[str] = None,
@@ -96,13 +114,42 @@ def compute_ligand_orientation_single(
         ligand_resname = _detect_ligand_resname(system)
 
     t = md.load(str(traj_path), top=str(system))
+    ref = t[0]
+    t.superpose(ref)
     top = t.topology
 
     timestep_ps = float(t.time[1] - t.time[0]) if t.n_frames > 1 else None
 
-    lig_idx = top.select(f"resname {ligand_resname}")
-    if lig_idx.size == 0:
+    # ---------------------------
+    # LIGAND SELECTION
+    # ---------------------------
+    lig_all_idx = top.select(f"resname {ligand_resname}")
+    if lig_all_idx.size == 0:
         return {"error": f"No atoms found for ligand resname={ligand_resname}"}
+
+    # Determine ligand_case from metadata if available
+    # Otherwise fallback to "default"
+    ligand_case = load_ligand_case(job_dir)
+    ligand_core = LIGAND_CORE_BEADS.get(ligand_case, LIGAND_CORE_BEADS["default"])
+
+    if ligand_core is None:
+        # Default → use all ORT beads
+        core_idx = lig_all_idx
+    else:
+        # Try to find bead names explicitly
+        idx_list = []
+        for bead in ligand_core:
+            sel = top.select(f"resname {ligand_resname} and name {bead}")
+            if sel.size > 0:
+                idx_list.append(sel[0])
+
+        # If bad specification → fallback
+        if len(idx_list) < 2:
+            core_idx = lig_all_idx
+        else:
+            core_idx = np.array(idx_list, dtype=int)
+
+    lig_idx = core_idx  # this is the NEW final ligand index selection
 
     prot_idx = top.select("protein")
     if prot_idx.size == 0:
@@ -144,16 +191,41 @@ def compute_ligand_orientation_single(
     r1_xyz = t.xyz[:, r1_idx, :]
     r2_xyz = t.xyz[:, r2_idx, :]
 
+    prev_v = None
     for i in range(n):
-        v = _principal_axis(lig_xyz[i])
-        a = _angle_deg(v, z)
-        # Symmetrize axis sign (v and -v are same axis):
-        a = min(a, 180.0 - a)
-        # Often you want 0..90:
-        if a > 90.0:
-            a = 180.0 - a
+        # compute principal axis from *core beads only*
+        v = _principal_axis(t.xyz[i, lig_idx, :])
+        v = v / (np.linalg.norm(v) + 1e-12)
 
+        # Flip-prevention
+        if prev_v is not None and np.dot(v, prev_v) < 0:
+            v = -v
+
+        prev_v = v
+
+        v = v / (np.linalg.norm(v) + 1e-12)
+
+        # --- Flip prevention: sign stability ---
+        if prev_v is not None:
+            # If v suddenly points opposite, flip v so it stays continuous
+            if np.dot(v, prev_v) < 0:
+                v = -v
+
+        prev_v = v
+
+        # --- Now compute angle safely ---
+        a = _angle_deg(v, z)
+        a = min(a, 180.0 - a)
         angles.append(a)
+        # v = _principal_axis(lig_xyz[i])
+        # a = _angle_deg(v, z)
+        # # Symmetrize axis sign (v and -v are same axis):
+        # a = min(a, 180.0 - a)
+        # # Often you want 0..90:
+        # if a > 90.0:
+        #     a = 180.0 - a
+        #
+        # angles.append(a)
 
         lig_com_z.append(float(lig_com[i, 2]))
         lig_minus_prot_com_z.append(float(lig_com[i, 2] - prot_com[i, 2]))

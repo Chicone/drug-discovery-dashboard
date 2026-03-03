@@ -5,7 +5,7 @@ from backend.services.analysis.ligand_rmsd import compute_ligand_rmsd_multi
 from backend.services.md_helpers import MD_RUNS_DIR
 import mdtraj as md
 
-from backend.services.analysis.distance import (
+from backend.services.analysis.ligand_com_distance  import (
     compute_ligand_com_multi,
 )
 
