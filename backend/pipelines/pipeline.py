@@ -76,11 +76,27 @@ LIGAND_PULL_CASES = {
 
     "neca": {
         "hb_bead": "N07",
-        "pull1_init": 0.35,
-        "pull1_k": 350.0,
+
+        # depth restraint (adenine anchored to F168)
+        "pull1_init": 0.65,
+        "pull1_k": 450.0,
+
+        # orientation restraint (HB donor)
         "pull2_init": 0.40,
-        "pull2_k": 50.0,
+        "pull2_k": 180.0,
+
+        # lateral stabilization
+        "pull3_init": 0.45,
+        "pull3_k": 120.0,
     },
+
+    # "neca": {
+    #     "hb_bead": "N07",
+    #     "pull1_init": 0.35,
+    #     "pull1_k": 350.0,
+    #     "pull2_init": 0.40,
+    #     "pull2_k": 50.0,
+    # },
 }
 
 # ------------------------------- Config ------------------------------
@@ -839,6 +855,8 @@ def step_write_mdps(
     pull1_k = case.get("pull1_k", 150.0)
     pull2_init = case.get("pull2_init", 0.47)
     pull2_k = case.get("pull2_k", 40.0)
+    pull3_init = case.get("pull3_init", 0.45)
+    pull3_k = case.get("pull3_k", 120.0)
 
     hb_bead = case.get("hb_bead", "N05")
 
@@ -851,13 +869,15 @@ def step_write_mdps(
     ; ligand_case = {ligand_case}
 
     pull                    = yes
-    pull_ncoords            = 2
-    pull_ngroups            = 4
-
+    pull_ncoords            = 3
+    pull_ngroups            = 6
+    
     pull_group1_name        = LIG_COM
     pull_group2_name        = POCKET_REF
     pull_group3_name        = LIG_{hb_bead}
     pull_group4_name        = RES253_SC1
+    pull_group5_name        = LIG_N06
+    pull_group6_name        = RES169_BB
 
     ; -------------------------
     ; Restraint 1: depth anchor
@@ -882,6 +902,18 @@ def step_write_mdps(
     pull_coord2_init        = {pull2_init:.3f}
     pull_coord2_k           = {pull2_k:.1f}
     pull_coord2_start       = no
+    
+    ; -------------------------
+    ; Restraint 3: lateral stabilization
+    ; adenine bead ↔ E169
+    ; -------------------------
+    pull_coord3_type        = umbrella
+    pull_coord3_geometry    = distance
+    pull_coord3_groups      = 5 6
+    pull_coord3_dim         = Y Y Y
+    pull_coord3_init        = {pull3_init:.3f}
+    pull_coord3_k           = {pull3_k:.1f}
+    pull_coord3_start       = no
 
     pull_pbc_ref_prev_step_com = yes
     """
@@ -1475,10 +1507,12 @@ def create_pull_index(cfg: PipelineConfig) -> None:
     # We don't rely on 'name' any more; we only create groups with
     # default auto-names, then patch the headers in a second pass.
     commands = (
-        "r ORT\n"  # ligand beads
-        f"r ORT & a {hb_bead}\n"  # ligand hb_bead (N05/N07/N01…)
+        "r ORT\n"
+        f"r ORT & a {hb_bead}\n"
+        "r ORT & a N06\n"
         "r 168 & a SC1 | r 168 & a SC2 | r 168 & a SC3\n"
         "r 253 & a SC1\n"
+        "r 169 & a BB\n"
         "q\n"
     )
 
@@ -1550,6 +1584,14 @@ def patch_pull_group_names(
         # 253 sidechain bead
         if "r_253_&_SC1" in stripped:
             out.append("[ RES253_SC1 ]")
+            continue
+
+        if "r_169_&_BB" in stripped:
+            out.append("[ RES169_BB ]")
+            continue
+
+        if stripped.startswith("[") and "ORT_&_" in stripped and "N06" in stripped:
+            out.append("[ LIG_N06 ]")
             continue
 
         out.append(line)
