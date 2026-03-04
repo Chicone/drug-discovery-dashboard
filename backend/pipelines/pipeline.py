@@ -59,27 +59,27 @@ LIGAND_PULL_CASES = {
 
         # Restraint 1: LIG_COM <-> POCKET_REF (168 ring COM)
         "pull1_init": 0.48,   # nm
-        "pull1_k": 150.0,     # kJ mol-1 nm-2
+        "pull1_k": 350.0,     # kJ mol-1 nm-2
 
         # Restraint 2: LIG_N05 <-> RES253_SC1
         "pull2_init": 0.47,   # nm
-        "pull2_k": 40.0,     # kJ mol-1 nm-2
+        "pull2_k": 50.0,     # kJ mol-1 nm-2
     },
 
      "luf5834": {
         "hb_bead": "N01",
         "pull1_init": 0.40,
-        "pull1_k": 150.0,
+        "pull1_k": 350.0,
         "pull2_init": 0.42,
-        "pull2_k": 40.0,
+        "pull2_k": 50.0,
     },
 
     "neca": {
         "hb_bead": "N07",
-        "pull1_init": 0.315,
+        "pull1_init": 0.35,
         "pull1_k": 350.0,
         "pull2_init": 0.40,
-        "pull2_k": 150.0,
+        "pull2_k": 50.0,
     },
 }
 
@@ -926,173 +926,6 @@ def step_write_mdps(
 
         cfg.md_mdp.write_text(md_text)
         print(f"[patch] Applied md_ns override -> nsteps = {nsteps}")
-
-def step_write_mdps_old(cfg: PipelineConfig, md_ns_override: Optional[float] = None) -> None:
-    print("\n=== 4) WRITE MDP FILES ===")
-    print("[DEBUG] md_ns_override =", md_ns_override)
-
-    # -------------------------------------------------
-    # Select MDP template set based on scenario
-    # -------------------------------------------------
-    params_file = cfg.workdir.parent / "input" / "params.json"
-
-    scenario = None
-    if params_file.exists():
-        params = json.loads(params_file.read_text())
-        scenario = params.get("scenario")
-
-    if scenario == "ligand_water":
-        template_dir = MDP_DIR / "ligand_water"
-        print("[mdp] Using ligand_water MDP templates")
-
-    elif scenario.endswith("_water"):
-        template_dir = MDP_DIR / "protein_only"
-        print("[mdp] Using protein_water MDP templates")
-
-    elif scenario.endswith("_membrane"):
-        template_dir = MDP_DIR / "full"
-        print("[mdp] Using membrane/full MDP templates")
-
-    else:
-        raise ValueError(f"Unknown scenario for MDP selection: {scenario}")
-
-    def cp(name, out_path):
-        src = template_dir / name
-        if not src.exists():
-            raise FileNotFoundError(f"Missing MDP template: {src}")
-        write_text(out_path, src.read_text())
-
-    # -------------------------------------------------
-    # Copy default templates
-    # -------------------------------------------------
-    cp("em.mdp",  cfg.em_mdp)
-    cp("nvt.mdp", cfg.nvt_mdp)
-    cp("npt.mdp", cfg.npt_mdp)
-    cp("md.mdp",  cfg.md_mdp)
-
-    # -------------------------------------------------
-    # ADD RESTRAINT BLOCK (ONLY IN MD)
-    # -------------------------------------------------
-
-    pull_block = """
-
-    ; =======================
-    ;   DUAL RESTRAINT SETUP
-    ; =======================
-
-    pull                    = yes
-    pull_ncoords            = 2
-    pull_ngroups            = 4
-
-    pull_group1_name        = LIG_COM
-    pull_group2_name        = POCKET_REF
-    pull_group3_name        = LIG_N05
-    pull_group4_name        = RES253_SC1
-
-    ; -------------------------
-    ; Restraint 1: Depth anchor
-    ; LIGAND (COM) ↔ RES168 ring COM
-    ; -------------------------
-    pull_coord1_type        = umbrella
-    pull_coord1_geometry    = distance
-    pull_coord1_groups      = 1 2
-    pull_coord1_dim         = Y Y Y
-    pull_coord1_init        = 0.48      ; nm
-    pull_coord1_k           = 150       ; soft to avoid distortion
-    pull_coord1_start       = no
-
-    ; -------------------------
-    ; Restraint 2: Orientation
-    ; N05 ↔ 253 SC1
-    ; -------------------------
-    pull_coord2_type        = umbrella
-    pull_coord2_geometry    = distance
-    pull_coord2_groups      = 3 4
-    pull_coord2_dim         = Y Y Y
-    pull_coord2_init        = 0.47      ; nm
-    pull_coord2_k           = 100       ; weaker, only to keep orientation
-    pull_coord2_start       = no
-
-    pull_pbc_ref_prev_step_com = yes
-    """
-
-    pull_block_168_253 = """
-
-   ; ===== DUAL RESTRAINT (CORRECT): =====
-;   168 SC1  ↔ ligand ring (C03/N01)
-;   253 SC1  ↔ ligand N05
-
-
-    pull                    = yes
-    pull_ncoords            = 2
-    pull_ngroups            = 4
-    
-    pull_group1_name        = LIG_RING     ; central aromatic ring bead
-    pull_group2_name        = RES168       ; residue 168 SC1
-    pull_group3_name        = LIG_N05      ; ligand N05
-    pull_group4_name        = ASN253       ; residue 253 SC1
-    
-    
-    ; ----- Coord 1: central ring ↔ 168 -----
-    pull_coord1_type        = umbrella
-    pull_coord1_geometry    = distance
-    pull_coord1_groups      = 1 2          ; LIG_RING ↔ RES168
-    pull_coord1_dim         = Y Y Y
-    pull_coord1_k           = 100
-    pull_coord1_init        = 0.47
-    pull_coord1_start       = no
-    
-    
-    ; ----- Coord 2: N05 ↔ 253 -----
-    pull_coord2_type        = umbrella
-    pull_coord2_geometry    = distance
-    pull_coord2_groups      = 3 4          ; LIG_N05 ↔ ASN253
-    pull_coord2_dim         = Y Y Y
-    pull_coord2_k           = 150
-    pull_coord2_init        = 0.475
-    pull_coord2_start       = no
-        
-    pull_pbc_ref_prev_step_com = yes    
-    """
-
-    # Only add pulling restraint if the scenario includes a ligand
-    if cfg.orth_itp is not None:
-        print("[pull] Ligand detected → injecting restraint")
-        for mdp in [cfg.nvt_mdp, cfg.npt_mdp, cfg.md_mdp]:
-            text = mdp.read_text()
-            mdp.write_text(text + pull_block)
-            print(f"[pull] Injected restraint into {mdp.name}")
-    else:
-        print("[pull] No ligand → skipping restraint injection")
-
-    # -------------------------------------------------
-    # Apply MD duration override (md_ns)
-    # -------------------------------------------------
-    if md_ns_override is not None:
-        md_text = cfg.md_mdp.read_text()
-
-        # convert ns → nsteps
-        dt = None
-        for line in md_text.splitlines():
-            if line.strip().startswith("dt"):
-                dt = float(line.split("=")[1])
-                break
-
-        if dt is None:
-            raise RuntimeError("md.mdp missing 'dt' parameter")
-
-        nsteps = int((md_ns_override * 1000) / dt)
-
-        md_text = re.sub(
-            r"^nsteps\s*=\s*\d+",
-            f"nsteps = {nsteps}",
-            md_text,
-            flags=re.MULTILINE
-        )
-
-        cfg.md_mdp.write_text(md_text)
-        print(f"[patch] Applied md_ns override → nsteps = {nsteps}")
-
 
 
 def step_grompp_mdrun_em(cfg: PipelineConfig, nt: int) -> None:
@@ -2274,6 +2107,20 @@ def main(argv=None) -> None:
             itp_out=orth_itp,
         )
 
+        # 1. Ensure all virtual sites have zero mass
+        patch_virtual_site_masses(orth_itp)
+
+        # 2. Soften dihedrals (critical for stability)
+        patch_ligand(
+            orth_itp,
+            bond_factor=1.0,
+            angle_factor=1.0,
+            dihedral_factor=0.3,
+            bond_k_min=0.0,
+            angle_k_min=0.0,
+            dihedral_k_min=0.0,
+        )
+
         # patch_small_beads(orth_itp)
         # patch_ligand(orth_itp, factor=0.0, k_min=10)
 
@@ -2311,7 +2158,7 @@ def main(argv=None) -> None:
                 orth_itp,
                 bond_factor=1,
                 angle_factor=1,
-                dihedral_factor=1,
+                dihedral_factor=0.3,
                 bond_k_min=0,
                 angle_k_min=0,
                 dihedral_k_min=0,
