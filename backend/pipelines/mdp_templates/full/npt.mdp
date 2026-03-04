@@ -53,3 +53,7 @@ constraints             = h-bonds
 lincs-order = 8
 lincs-iter  = 2
 
+; ----- COM motion -----
+comm-mode               = Linear
+comm-grps               = System
+
