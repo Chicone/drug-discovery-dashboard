@@ -54,35 +54,62 @@ MDP_DIR = Path(__file__).resolve().parent / "mdp_templates"
 
 LIGAND_PULL_CASES = {
     "default": {
-        # Name of the ligand bead used for the 253 restraint
+        # Name of the ligand bead used for the 253 and 169 restraint
         "hb_bead": "N05",
+        "lat_bead": "N05", # yes, same bead bods to both 253 and 169 residues
 
         # Restraint 1: LIG_COM <-> POCKET_REF (168 ring COM)
-        "pull1_init": 0.48,   # nm
-        "pull1_k": 350.0,     # kJ mol-1 nm-2
+        "pull1_init": 0.65,   # nm
+        "pull1_k": 450.0,     # kJ mol-1 nm-2
 
         # Restraint 2: LIG_N05 <-> RES253_SC1
-        "pull2_init": 0.47,   # nm
-        "pull2_k": 50.0,     # kJ mol-1 nm-2
+        "pull2_init": 0.40,   # nm
+        "pull2_k": 180.0,     # kJ mol-1 nm-2
+
+        # lateral stabilization
+        "pull3_init": 0.55,
+        "pull3_k": 120.0,
+    },
+
+    "cpd5": {
+        # Name of the ligand bead used for the 253 restraint
+        "hb_bead": "N05",
+        "lat_bead": "N05", # yes, same bead bods to both 253 and 169 residues
+
+        # Restraint 1: LIG_COM <-> POCKET_REF (168 ring COM)
+        "pull1_init": 0.65,  # nm
+        "pull1_k": 450.0,  # kJ mol-1 nm-2
+
+        # Restraint 2: LIG_N05 <-> RES253_SC1
+        "pull2_init": 0.40,  # nm
+        "pull2_k": 180.0,  # kJ mol-1 nm-2
+
+        # lateral stabilization
+        "pull3_init": 0.55,
+        "pull3_k": 120.0,
     },
 
      "luf5834": {
         "hb_bead": "N01",
-        "pull1_init": 0.40,
-        "pull1_k": 350.0,
-        "pull2_init": 0.42,
-        "pull2_k": 50.0,
+        "lat_bead": "N02",
+        "pull1_init": 0.41,
+        "pull1_k": 450.0,
+        "pull2_init": 0.38,
+        "pull2_k": 180.0,
+        "pull3_init": 0.74,
+        "pull3_k": 120.0,
     },
 
     "neca": {
-        "hb_bead": "N07",
+        "hb_beads": ["N07", "N04"],
+        "lat_bead": "N07",
 
         # depth restraint (adenine anchored to F168)
         "pull1_init": 0.65,
         "pull1_k": 450.0,
 
         # orientation restraint (HB donor)
-        "pull2_init": 0.40,
+        "pull2_init": 0.65,
         "pull2_k": 180.0,
 
         # lateral stabilization
@@ -858,7 +885,12 @@ def step_write_mdps(
     pull3_init = case.get("pull3_init", 0.45)
     pull3_k = case.get("pull3_k", 120.0)
 
-    hb_bead = case.get("hb_bead", "N05")
+    hb_beads = case.get("hb_beads")
+    if hb_beads:
+        hb_bead = hb_beads[0]
+    else:
+        hb_bead = case.get("hb_bead", "N05")
+    lat_bead = case.get("lat_bead", "N06")
 
     pull_block = f"""
 
@@ -874,9 +906,11 @@ def step_write_mdps(
     
     pull_group1_name        = LIG_COM
     pull_group2_name        = POCKET_REF
-    pull_group3_name        = LIG_{hb_bead}
+    
+    pull_group3_name        = LIG_HB
     pull_group4_name        = RES253_SC1
-    pull_group5_name        = LIG_N06
+    
+    pull_group5_name        = LIG_{lat_bead}
     pull_group6_name        = RES169_BB
 
     ; -------------------------
@@ -887,9 +921,9 @@ def step_write_mdps(
     pull_coord1_geometry    = distance
     pull_coord1_groups      = 1 2
     pull_coord1_dim         = Y Y Y
-    pull_coord1_init        = {pull1_init:.3f}
+    ;pull_coord1_init        = {pull1_init:.3f}
     pull_coord1_k           = {pull1_k:.1f}
-    pull_coord1_start       = no
+    pull_coord1_start       = yes
 
     ; -------------------------
     ; Restraint 2: orientation
@@ -899,9 +933,9 @@ def step_write_mdps(
     pull_coord2_geometry    = distance
     pull_coord2_groups      = 3 4
     pull_coord2_dim         = Y Y Y
-    pull_coord2_init        = {pull2_init:.3f}
+    ;pull_coord2_init        = {pull2_init:.3f}
     pull_coord2_k           = {pull2_k:.1f}
-    pull_coord2_start       = no
+    pull_coord2_start       = yes
     
     ; -------------------------
     ; Restraint 3: lateral stabilization
@@ -911,9 +945,9 @@ def step_write_mdps(
     pull_coord3_geometry    = distance
     pull_coord3_groups      = 5 6
     pull_coord3_dim         = Y Y Y
-    pull_coord3_init        = {pull3_init:.3f}
+    ;pull_coord3_init        = {pull3_init:.3f}
     pull_coord3_k           = {pull3_k:.1f}
-    pull_coord3_start       = no
+    pull_coord3_start       = yes
 
     pull_pbc_ref_prev_step_com = yes
     """
@@ -1495,8 +1529,9 @@ def create_pull_index(cfg: PipelineConfig) -> None:
         )
         case = LIGAND_PULL_CASES["default"]
 
-    hb_bead = case.get("hb_bead", "N05")
-
+    hb_beads = case.get("hb_beads", ["N05"])
+    lat_bead = case.get("lat_bead", hb_beads[0])
+    hb_selection = " | ".join(f"r ORT & a {b}" for b in hb_beads)
     # --- run make_ndx to create the relevant groups ---
     ndx = cfg.workdir / "index.ndx"
     if ndx.exists():
@@ -1508,8 +1543,9 @@ def create_pull_index(cfg: PipelineConfig) -> None:
     # default auto-names, then patch the headers in a second pass.
     commands = (
         "r ORT\n"
-        f"r ORT & a {hb_bead}\n"
-        "r ORT & a N06\n"
+        "r ORT & a N07\n"
+        "r ORT & a N04\n"
+        f"r ORT & a {lat_bead}\n"
         "r 168 & a SC1 | r 168 & a SC2 | r 168 & a SC3\n"
         "r 253 & a SC1\n"
         "r 169 & a BB\n"
@@ -1528,73 +1564,85 @@ def create_pull_index(cfg: PipelineConfig) -> None:
         raise RuntimeError("make_ndx failed in create_pull_index")
 
     # --- patch the group names in index.ndx ---
-    patch_pull_group_names(ndx, hb_bead, ligand_case)
+    patch_pull_group_names(ndx, hb_beads, lat_bead)
 
     print(
-        f"[pull] LIG_COM, LIG_{hb_bead}, POCKET_REF, RES253_SC1 created "
-        f"(ligand_case='{ligand_case}', hb_bead='{hb_bead}')"
+        f"[pull] LIG_COM, LIG_HB, POCKET_REF, RES253_SC1 created "
+        f"(ligand_case='{ligand_case}', hb_beads={hb_beads})"
     )
 
 def patch_pull_group_names(
     ndx_path: Path,
-    hb_bead: str,
-    ligand_case: str,
+    hb_beads: list[str],
+    lat_bead: str,
 ) -> None:
-    """
-    Rename auto-generated groups from make_ndx to the pull names:
-
-      [ ORT ]                           -> [ LIG_COM ]
-      [ ORT_&_<hb_bead> ]               -> [ LIG_<hb_bead> ]
-      [ r_168_&_SC1_r_168_&_SC2_r_168_&_SC3 ]
-                                        -> [ POCKET_REF ]
-      [ r_253_&_SC1 ]                   -> [ RES253_SC1 ]
-
-    We match by substring rather than exact full header to be robust
-    to minor spacing changes.
-    """
-
     if not ndx_path.exists():
         raise FileNotFoundError(f"index.ndx not found: {ndx_path}")
 
     lines = ndx_path.read_text(encoding="utf-8", errors="replace").splitlines()
-    out = []
+
+    groups = {}
+    current_name = None
+    current_atoms = []
+
+    def flush():
+        nonlocal current_name, current_atoms
+        if current_name is not None:
+            groups[current_name] = current_atoms[:]
 
     for line in lines:
         stripped = line.strip()
 
-        # ligand all beads
-        if stripped == "[ ORT ]":
-            out.append("[ LIG_COM ]")
-            continue
+        if stripped.startswith("[") and stripped.endswith("]"):
+            flush()
+            current_name = stripped[1:-1].strip()
+            current_atoms = []
+        elif stripped:
+            current_atoms.extend(stripped.split())
 
-        # ligand hb_bead (N05/N07/N01 etc.)
-        if (
-            stripped.startswith("[")
-            and "ORT_&_" in stripped
-            and hb_bead in stripped
-        ):
-            out.append(f"[ LIG_{hb_bead} ]")
-            continue
+    flush()
 
-        # pocket ref (168 ring)
-        if "r_168_&_SC1_r_168_&_SC2_r_168_&_SC3" in stripped:
-            out.append("[ POCKET_REF ]")
-            continue
+    renamed = {}
 
-        # 253 sidechain bead
-        if "r_253_&_SC1" in stripped:
-            out.append("[ RES253_SC1 ]")
-            continue
+    for name, atoms in groups.items():
+        if name == "ORT":
+            renamed["LIG_COM"] = atoms
+        elif name.startswith("ORT_&_"):
+            bead = name.replace("ORT_&_", "")
+            if bead in hb_beads or bead == lat_bead:
+                renamed[f"LIG_{bead}"] = atoms
+        elif "r_168_&_SC1_r_168_&_SC2_r_168_&_SC3" in name:
+            renamed["POCKET_REF"] = atoms
+        elif "r_253_&_SC1" in name:
+            renamed["RES253_SC1"] = atoms
+        elif "r_169_&_BB" in name:
+            renamed["RES169_BB"] = atoms
+        else:
+            renamed[name] = atoms
 
-        if "r_169_&_BB" in stripped:
-            out.append("[ RES169_BB ]")
-            continue
+    # Build combined HB group explicitly from the single-bead groups
+    hb_atoms = []
+    for bead in hb_beads:
+        hb_atoms.extend(renamed.get(f"LIG_{bead}", []))
 
-        if stripped.startswith("[") and "ORT_&_" in stripped and "N06" in stripped:
-            out.append("[ LIG_N06 ]")
-            continue
+    if hb_atoms:
+        # unique + sorted numerically
+        hb_atoms = sorted(set(hb_atoms), key=int)
+        renamed["LIG_HB"] = hb_atoms
 
-        out.append(line)
+    # Write back
+    out = []
+    for name, atoms in renamed.items():
+        out.append(f"[ {name} ]")
+        if atoms:
+            # write 15 atoms per line
+            for i in range(0, len(atoms), 15):
+                out.append(" ".join(f"{a:>4}" for a in atoms[i:i+15]))
+        else:
+            out.append("")
+
+    ndx_path.write_text("\n".join(out) + "\n", encoding="utf-8")
+    print("[pull] Patched index.ndx headers for pull groups")
 
     ndx_path.write_text("\n".join(out) + "\n", encoding="utf-8")
 
