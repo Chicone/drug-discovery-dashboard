@@ -406,6 +406,7 @@ def create_md_job_service(
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 # ============================================================

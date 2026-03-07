@@ -211,21 +211,41 @@ def open_chimerax(job_id: str):
     if not topology.exists():
         raise HTTPException(status_code=404, detail="Topology not found")
 
-    candidates = [
-        "md.xtc",
-        "md.part0001.xtc",
-        "npt.xtc",
-        "npt.part0001.xtc",
-        "nvt.xtc",
-    ]
+    import re
+
+    # ---------------------------------------------------------
+    # 1. Look for md.partXXXX.xtc files and pick the highest
+    # ---------------------------------------------------------
+    part_files = list(out_dir.glob("md.part*.xtc"))
 
     chosen = None
-    for name in candidates:
-        p = out_dir / name
-        if p.exists() and p.stat().st_size > 0:
-            chosen = p
-            break
 
+    if part_files:
+        def part_index(path):
+            m = re.search(r"\.part(\d+)\.", path.name)
+            return int(m.group(1)) if m else -1
+
+        chosen = max(part_files, key=part_index)
+
+    # ---------------------------------------------------------
+    # 2. Fallbacks if no part files exist
+    # ---------------------------------------------------------
+    else:
+        candidates = [
+            "md.xtc",
+            "npt.xtc",
+            "nvt.xtc",
+        ]
+
+        for name in candidates:
+            p = out_dir / name
+            if p.exists() and p.stat().st_size > 0:
+                chosen = p
+                break
+
+    # ---------------------------------------------------------
+    # 3. Fail if nothing found
+    # ---------------------------------------------------------
     if chosen is None:
         raise HTTPException(status_code=404, detail="No trajectory file found")
 
