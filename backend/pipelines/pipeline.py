@@ -101,21 +101,24 @@ LIGAND_PULL_CASES = {
     },
 
     "neca": {
-        "hb_beads": ["N07", "N04"],
-        "lat_bead": "N07",
+        "hb_bead": "N05",
+        "lat_bead": "N05",
 
-        # depth restraint (adenine anchored to F168)
+        # depth restraint
         "pull1_init": 0.65,
-        "pull1_k": 450.0,
+        "pull1_k_eq": 300.0,
+        "pull1_k_md": 100.0,
 
-        # orientation restraint (HB donor)
-        "pull2_init": 0.65,
-        "pull2_k": 180.0,
+        # orientation restraint
+        "pull2_init": 0.40,
+        "pull2_k_eq": 300.0,
+        "pull2_k_md": 100.0,
 
         # lateral stabilization
-        "pull3_init": 0.45,
-        "pull3_k": 120.0,
-    },
+        "pull3_init": 0.55,
+        "pull3_k_eq": 300.0,
+        "pull3_k_md": 100.0,
+    }
 
     # "neca": {
     #     "hb_bead": "N07",
@@ -828,9 +831,6 @@ def step_write_mdps(
     print("\n=== 4) WRITE MDP FILES ===")
     print("[DEBUG] md_ns_override =", md_ns_override)
 
-    # -------------------------------------------------
-    # Select MDP template set based on scenario
-    # -------------------------------------------------
     params_file = cfg.workdir.parent / "input" / "params.json"
 
     scenario = None
@@ -870,108 +870,144 @@ def step_write_mdps(
     cp("md.mdp", cfg.md_mdp)
 
     # -------------------------------------------------
-    # Prepare ligand pull parameters for this case
+    # Pull parameters
     # -------------------------------------------------
-    case = LIGAND_PULL_CASES.get(ligand_case)
-    if case is None:
-        print(f"[pull] WARNING: unknown ligand_case '{ligand_case}', "
-              "using 'default'")
-        case = LIGAND_PULL_CASES["default"]
+    case = LIGAND_PULL_CASES.get(ligand_case, LIGAND_PULL_CASES["default"])
 
     pull1_init = case.get("pull1_init", 0.48)
-    pull1_k = case.get("pull1_k", 150.0)
+    pull1_k_eq = case.get("pull1_k_eq", 300.0)
+    pull1_k_md = case.get("pull1_k_md", 80.0)
+
     pull2_init = case.get("pull2_init", 0.47)
-    pull2_k = case.get("pull2_k", 40.0)
+    pull2_k_eq = case.get("pull2_k_eq", 300.0)
+    pull2_k_md = case.get("pull2_k_md", 40.0)
+
     pull3_init = case.get("pull3_init", 0.45)
-    pull3_k = case.get("pull3_k", 120.0)
+    pull3_k_eq = case.get("pull3_k_eq", 300.0)
+    pull3_k_md = case.get("pull3_k_md", 30.0)
 
     hb_beads = case.get("hb_beads")
     if hb_beads:
         hb_bead = hb_beads[0]
     else:
         hb_bead = case.get("hb_bead", "N05")
+
     lat_bead = case.get("lat_bead", "N06")
 
-    pull_block = f"""
+    # -------------------------------------------------
+    # Pull blocks
+    # -------------------------------------------------
 
-    ; =======================
-    ;   DUAL RESTRAINT SETUP
-    ; =======================
+    pull_block_eq = f"""
 
-    ; ligand_case = {ligand_case}
+; =======================
+;   RESTRAINTS (EQ)
+; =======================
 
-    pull                    = yes
-    pull_ncoords            = 3
-    pull_ngroups            = 6
-    
-    pull_group1_name        = LIG_COM
-    pull_group2_name        = POCKET_REF
-    
-    pull_group3_name        = LIG_HB
-    pull_group4_name        = RES253_SC1
-    
-    pull_group5_name        = LIG_{lat_bead}
-    pull_group6_name        = RES169_BB
+pull                    = yes
+pull_ncoords            = 3
+pull_ngroups            = 6
 
-    ; -------------------------
-    ; Restraint 1: depth anchor
-    ; LIG_COM (all beads) ↔ POCKET_REF (168 ring COM)
-    ; -------------------------
-    pull_coord1_type        = umbrella
-    pull_coord1_geometry    = distance
-    pull_coord1_groups      = 1 2
-    pull_coord1_dim         = Y Y Y
-    ;pull_coord1_init        = {pull1_init:.3f}
-    pull_coord1_k           = {pull1_k:.1f}
-    pull_coord1_start       = yes
+pull_group1_name        = LIG_RING
+pull_group2_name        = POCKET_REF
 
-    ; -------------------------
-    ; Restraint 2: orientation
-    ; LIG_N05 ↔ RES253_SC1
-    ; -------------------------
-    pull_coord2_type        = umbrella
-    pull_coord2_geometry    = distance
-    pull_coord2_groups      = 3 4
-    pull_coord2_dim         = Y Y Y
-    ;pull_coord2_init        = {pull2_init:.3f}
-    pull_coord2_k           = {pull2_k:.1f}
-    pull_coord2_start       = yes
-    
-    ; -------------------------
-    ; Restraint 3: lateral stabilization
-    ; adenine bead ↔ E169
-    ; -------------------------
-    pull_coord3_type        = umbrella
-    pull_coord3_geometry    = distance
-    pull_coord3_groups      = 5 6
-    pull_coord3_dim         = Y Y Y
-    ;pull_coord3_init        = {pull3_init:.3f}
-    pull_coord3_k           = {pull3_k:.1f}
-    pull_coord3_start       = yes
+pull_group3_name        = LIG_HB
+pull_group4_name        = RES253_SC1
 
-    pull_pbc_ref_prev_step_com = yes
-    """
+pull_group5_name        = LIG_{lat_bead}
+pull_group6_name        = RES169_BB
 
-    # Only add pulling restraint if the scenario includes a ligand
+pull_coord1_type        = umbrella
+pull_coord1_geometry    = distance
+pull_coord1_groups      = 1 2
+pull_coord1_dim         = Y Y Y
+pull_coord1_k           = {pull1_k_eq:.1f}
+pull_coord1_start       = yes
+
+pull_coord2_type        = umbrella
+pull_coord2_geometry    = distance
+pull_coord2_groups      = 3 4
+pull_coord2_dim         = Y Y Y
+pull_coord2_k           = {pull2_k_eq:.1f}
+pull_coord2_start       = yes
+
+pull_coord3_type        = umbrella
+pull_coord3_geometry    = distance
+pull_coord3_groups      = 5 6
+pull_coord3_dim         = Y Y Y
+pull_coord3_k           = {pull3_k_eq:.1f}
+pull_coord3_start       = yes
+
+pull_pbc_ref_prev_step_com = yes
+"""
+
+    pull_block_md = f"""
+
+; =======================
+;   RESTRAINTS (MD)
+; =======================
+
+pull                    = yes
+pull_ncoords            = 3
+pull_ngroups            = 6
+
+pull_group1_name        = LIG_RING
+pull_group2_name        = POCKET_REF
+
+pull_group3_name        = LIG_HB
+pull_group4_name        = RES253_SC1
+
+pull_group5_name        = LIG_{lat_bead}
+pull_group6_name        = RES169_BB
+
+pull_coord1_type        = umbrella
+pull_coord1_geometry    = distance
+pull_coord1_groups      = 1 2
+pull_coord1_dim         = Y Y Y
+pull_coord1_k           = {pull1_k_md:.1f}
+pull_coord1_start       = yes
+
+pull_coord2_type        = umbrella
+pull_coord2_geometry    = distance
+pull_coord2_groups      = 3 4
+pull_coord2_dim         = Y Y Y
+pull_coord2_k           = {pull2_k_md:.1f}
+pull_coord2_start       = yes
+
+pull_coord3_type        = umbrella
+pull_coord3_geometry    = distance
+pull_coord3_groups      = 5 6
+pull_coord3_dim         = Y Y Y
+pull_coord3_k           = {pull3_k_md:.1f}
+pull_coord3_start       = yes
+
+pull_pbc_ref_prev_step_com = yes
+"""
+
+    # -------------------------------------------------
+    # Inject restraints
+    # -------------------------------------------------
     if cfg.orth_itp is not None:
-        print(
-            "[pull] Ligand detected -> injecting restraint for "
-            f"ligand_case='{ligand_case}'"
-        )
-        for mdp in [cfg.nvt_mdp, cfg.npt_mdp, cfg.md_mdp]:
+        print(f"[pull] Injecting restraints for ligand_case='{ligand_case}'")
+
+        for mdp in [cfg.nvt_mdp, cfg.npt_mdp]:
             text = mdp.read_text()
-            mdp.write_text(text + pull_block)
-            print(f"[pull] Injected restraint into {mdp.name}")
+            mdp.write_text(text + pull_block_eq)
+            print(f"[pull] EQ restraints injected into {mdp.name}")
+
+        text = cfg.md_mdp.read_text()
+        cfg.md_mdp.write_text(text + pull_block_md)
+        print(f"[pull] MD restraints injected into md.mdp")
+
     else:
         print("[pull] No ligand -> skipping restraint injection")
 
     # -------------------------------------------------
-    # Apply MD duration override (md_ns)
+    # Apply MD duration override
     # -------------------------------------------------
     if md_ns_override is not None:
         md_text = cfg.md_mdp.read_text()
 
-        # convert ns -> nsteps
         dt = None
         for line in md_text.splitlines():
             if line.strip().startswith("dt"):
@@ -992,7 +1028,6 @@ def step_write_mdps(
 
         cfg.md_mdp.write_text(md_text)
         print(f"[patch] Applied md_ns override -> nsteps = {nsteps}")
-
 
 def step_grompp_mdrun_em(cfg: PipelineConfig, nt: int) -> None:
     print("\n=== 5-6) EM: grompp + mdrun ===")
@@ -1072,6 +1107,8 @@ def step_grompp_mdrun_nvt(cfg: PipelineConfig, nt: int) -> None:
     # c_in = cfg.workdir / f"{cfg.em_deffnm}.gro"
     must_exist(c_in, "em.gro input for NVT")
 
+    create_pull_index(cfg, c_in)
+
     run(
         [
             "gmx", "grompp",
@@ -1125,6 +1162,8 @@ def step_grompp_mdrun_npt(cfg: PipelineConfig, nt: int) -> None:
             raise RuntimeError("params.json must define 'start_gro' for continuation")
 
         gro_in = workdir / start_gro
+
+        create_pull_index(cfg, gro_in)
 
         start_cpt = params.get("start_cpt")
         cpt_in = workdir / start_cpt if start_cpt else None
@@ -1216,6 +1255,8 @@ def step_grompp_mdrun_md(cfg: PipelineConfig, nt: int) -> None:
     gro_in = workdir / start_gro
     if not gro_in.exists():
         raise FileNotFoundError(f"start_gro '{start_gro}' not found")
+
+    create_pull_index(cfg, gro_in)
 
     # ------------------------------------------------
     # Correct continuation logic
@@ -1495,14 +1536,14 @@ def cache_save_after_martinize(cfg, cache_dir: Path):
     print(f"[CACHE SAVED] Martinized complex stored in: {cache_dir}")
 
 
-def create_pull_index(cfg: PipelineConfig) -> None:
+def create_pull_index(cfg: PipelineConfig, structure: Path) -> None:
     """
     Create index.ndx with pull groups.
 
     We let make_ndx generate groups with its default names and
     then patch the headers to:
 
-      [ LIG_COM ]       = all ORT beads
+      [ LIG_RING ]       = Adenine ORT beads
       [ LIG_<hb_bead> ] = ligand-specific H-bond bead (N05, N07, N01…)
       [ POCKET_REF ]    = 168 aromatic ring (SC1+SC2+SC3)
       [ RES253_SC1 ]    = residue 253 SC1 bead
@@ -1537,14 +1578,16 @@ def create_pull_index(cfg: PipelineConfig) -> None:
     if ndx.exists():
         ndx.unlink()
 
-    cmd = ["gmx", "make_ndx", "-f", str(cfg.system_gro), "-o", str(ndx)]
+    cmd = ["gmx", "make_ndx", "-f", str(structure), "-o", str(ndx)]
 
     # We don't rely on 'name' any more; we only create groups with
     # default auto-names, then patch the headers in a second pass.
     commands = (
         "r ORT\n"
-        "r ORT & a N07\n"
         "r ORT & a N04\n"
+        "r ORT & a N05\n"
+        "r ORT & a N06\n"
+        "r ORT & a N07\n"
         f"r ORT & a {lat_bead}\n"
         "r 168 & a SC1 | r 168 & a SC2 | r 168 & a SC3\n"
         "r 253 & a SC1\n"
@@ -1567,7 +1610,7 @@ def create_pull_index(cfg: PipelineConfig) -> None:
     patch_pull_group_names(ndx, hb_beads, lat_bead)
 
     print(
-        f"[pull] LIG_COM, LIG_HB, POCKET_REF, RES253_SC1 created "
+        f"[pull] LIG_RING, LIG_HB, POCKET_REF, RES253_SC1 created "
         f"(ligand_case='{ligand_case}', hb_beads={hb_beads})"
     )
 
@@ -1607,10 +1650,12 @@ def patch_pull_group_names(
     for name, atoms in groups.items():
         if name == "ORT":
             renamed["LIG_COM"] = atoms
-        elif name.startswith("ORT_&_"):
+        elif "ORT_&_N04_OR_ORT_&_N05_OR_ORT_&_N06" in name or \
+             "ORT_&_N04_ORT_&_N05_ORT_&_N06" in name:
+            renamed["LIG_RING"] = atoms
+        elif name.startswith("ORT_&_") and "_ORT_&_" not in name:
             bead = name.replace("ORT_&_", "")
-            if bead in hb_beads or bead == lat_bead:
-                renamed[f"LIG_{bead}"] = atoms
+            renamed[f"LIG_{bead}"] = atoms
         elif "r_168_&_SC1_r_168_&_SC2_r_168_&_SC3" in name:
             renamed["POCKET_REF"] = atoms
         elif "r_253_&_SC1" in name:
@@ -1630,6 +1675,15 @@ def patch_pull_group_names(
         hb_atoms = sorted(set(hb_atoms), key=int)
         renamed["LIG_HB"] = hb_atoms
 
+    # Build adenine ring group (N04, N05, N06)
+    ring_atoms = []
+    for bead in ["N04", "N05", "N06"]:
+        ring_atoms.extend(renamed.get(f"LIG_{bead}", []))
+
+    if ring_atoms:
+        ring_atoms = sorted(set(ring_atoms), key=int)
+        renamed["LIG_RING"] = ring_atoms
+
     # Write back
     out = []
     for name, atoms in renamed.items():
@@ -1648,211 +1702,6 @@ def patch_pull_group_names(
 
     # quick debug print
     print("[pull] Patched index.ndx headers for pull groups")
-
-# def create_pull_index(cfg: PipelineConfig) -> None:
-#     """
-#     Create index.ndx with pull groups.
-#
-#     Fixed to work for ANY ligand_case:
-#       LIG_COM        = all ORT beads
-#       LIG_<hb_bead>  = ligand-specific H-bond bead (N05, N07, N01…)
-#       POCKET_REF     = 168 aromatic ring (SC1+SC2+SC3)
-#       RES253_SC1     = residue 253 SC1 bead
-#     """
-#
-#     # Read ligand_case from params.json
-#     params_file = cfg.workdir.parent / "input" / "params.json"
-#     ligand_case = "default"
-#     if params_file.exists():
-#         try:
-#             params = json.loads(params_file.read_text())
-#             ligand_case = params.get("ligand_case", "default")
-#         except Exception:
-#             print("[pull] WARNING: could not read params.json, "
-#                   "using ligand_case='default'")
-#
-#     # Retrieve ligand-specific hb_bead (N05, N01, N07…)
-#     case = LIGAND_PULL_CASES.get(ligand_case)
-#     if case is None:
-#         print(f"[pull] WARNING: unknown ligand_case '{ligand_case}', using 'default'")
-#         case = LIGAND_PULL_CASES["default"]
-#
-#     hb_bead = case.get("hb_bead", "N05")  # <- THIS IS THE ONLY VARIABLE YOU NEED
-#
-#     # Output .ndx
-#     ndx = cfg.workdir / "index.ndx"
-#     if ndx.exists():
-#         ndx.unlink()
-#
-#     cmd = ["gmx", "make_ndx", "-f", str(cfg.system_gro), "-o", str(ndx)]
-#
-#     # IMPORTANT: use LIG_<hb_bead> instead of hardcoded LIG_N05
-#     commands = (
-#         # 19: Ligand COM (all beads)
-#         "r ORT\n"
-#         "name 0 LIG_COM\n"
-#         # "name 19 LIG_COM\n"
-#
-#         # 20: Ligand H-bond bead (depends on ligand_case)
-#         f"r ORT & a {hb_bead}\n"
-#         f"name 0 LIG_{hb_bead}\n"
-#         # f"name 20 LIG_{hb_bead}\n"
-#
-#         # 21: Residue 168 aromatic ring COM
-#         "r 168 & a SC1 | r 168 & a SC2 | r 168 & a SC3\n"
-#         "name 0 POCKET_REF\n"
-#         # "name 21 POCKET_REF\n"
-#
-#         # 22: Residue 253 SC1
-#         "r 253 & a SC1\n"
-#         "name 0 RES253_SC1\n"
-#         # "name 22 RES253_SC1\n"
-#
-#         "q\n"
-#     )
-#
-#     proc = subprocess.Popen(
-#         cmd,
-#         cwd=str(cfg.workdir),
-#         stdin=subprocess.PIPE,
-#         text=True,
-#     )
-#     proc.communicate(commands)
-#
-#     if proc.returncode != 0:
-#         raise RuntimeError("make_ndx failed")
-#
-#     print(
-#         f"[pull] LIG_COM, LIG_{hb_bead}, POCKET_REF, RES253_SC1 created "
-#         f"(ligand_case='{ligand_case}', hb_bead='{hb_bead}')"
-#     )
-
-# def create_pull_index(cfg: PipelineConfig) -> None:
-#     """
-#     Create index.ndx with pull groups.
-#
-#     Groups:
-#       19 LIG_COM      - all ORT beads (ligand COM)
-#       20 LIG_N05      - ligand H-bond bead (name depends on ligand_case)
-#       21 POCKET_REF   - residue 168 SC1+SC2+SC3 (ring COM)
-#       22 RES253_SC1   - residue 253 SC1 bead
-#     """
-#
-#     # Read ligand_case from params.json (optional)
-#     params_file = cfg.workdir.parent / "input" / "params.json"
-#     ligand_case = "default"
-#     if params_file.exists():
-#         try:
-#             params = json.loads(params_file.read_text())
-#             ligand_case = params.get("ligand_case", "default")
-#         except Exception:
-#             print("[pull] WARNING: could not read params.json, "
-#                   "using ligand_case='default'")
-#
-#     case = LIGAND_PULL_CASES.get(ligand_case)
-#     if case is None:
-#         print(f"[pull] WARNING: unknown ligand_case '{ligand_case}', "
-#               "using 'default'")
-#         case = LIGAND_PULL_CASES["default"]
-#
-#     hb_bead = case.get("hb_bead", "N05")
-#
-#     ndx = cfg.workdir / "index.ndx"
-#     if ndx.exists():
-#         ndx.unlink()
-#
-#     cmd = ["gmx", "make_ndx", "-f", str(cfg.system_gro), "-o", str(ndx)]
-#
-#     # Commands string is sent to make_ndx via stdin
-#     commands = (
-#         # Ligand COM (all beads)
-#         "r ORT\n"
-#         "name 19 LIG_COM\n"
-#
-#         # Ligand H-bond bead (configurable)
-#         f"r ORT & a {hb_bead}\n"
-#         "name 20 LIG_N05\n"
-#
-#         # Pocket reference: residue 168 aromatic ring COM
-#         "r 168 & a SC1 | r 168 & a SC2 | r 168 & a SC3\n"
-#         "name 21 POCKET_REF\n"
-#
-#         # Residue 253 SC1 bead
-#         "r 253 & a SC1\n"
-#         "name 22 RES253_SC1\n"
-#
-#         "q\n"
-#     )
-#
-#     proc = subprocess.Popen(
-#         cmd,
-#         cwd=str(cfg.workdir),
-#         stdin=subprocess.PIPE,
-#         text=True,
-#     )
-#     proc.communicate(commands)
-#
-#     if proc.returncode != 0:
-#         raise RuntimeError("make_ndx failed")
-#
-#     print(
-#         "[pull] LIG_COM, LIG_N05, POCKET_REF, RES253_SC1 created "
-#         f"(ligand_case='{ligand_case}', hb_bead='{hb_bead}')"
-#     )
-
-
-def create_pull_index_168_253(cfg: PipelineConfig):
-    ndx = cfg.workdir / "index.ndx"
-
-    if ndx.exists():
-        ndx.unlink()
-
-    cmd = [
-        "gmx", "make_ndx",
-        "-f", str(cfg.system_gro),
-        "-o", str(ndx),
-    ]
-
-    # We create:
-    #  - LIG_RING  (ligand C03 or N01)
-    #  - LIG_N05   (ligand N05 bead)
-    #  - RES168    (residue 168 SC1 bead)
-    #  - ASN253    (residue 253 SC1 bead)
-
-    commands = (
-        # Ligand ring bead (central aromatic group)
-        "r ORT & a C03 | r ORT & a N01\n"
-        "name 19 LIG_RING\n"
-
-        # Ligand H-bond donor bead
-        "r ORT & a N05\n"
-        "name 20 LIG_N05\n"
-
-        # Residue 168 aromatic ring: SC1 + SC2 + SC3 (COM will be used)
-        "r 168 & a SC1 | r 168 & a SC2 | r 168 & a SC3\n"
-        "name 21 RES168\n"
-
-        # Residue 253 SC1 (H-bond donor)
-        "r 253 & a SC1\n"
-        "name 22 ASN253\n"
-
-        "q\n"
-    )
-
-    proc = subprocess.Popen(
-        cmd,
-        cwd=str(cfg.workdir),
-        stdin=subprocess.PIPE,
-        text=True,
-    )
-
-    proc.communicate(commands)
-
-    if proc.returncode != 0:
-        raise RuntimeError("make_ndx failed")
-
-    print("[pull] LIG_RING, LIG_N05, RES168, ASN253 groups created")
-
 
 
 import numpy as np
@@ -2079,6 +1928,10 @@ def main(argv=None) -> None:
             params = json.loads(params_file.read_text())
             md_ns = params.get("md_ns")
 
+        orth_itp = cfg.workdir / "Orthosteric.itp"
+        if orth_itp.exists():
+            cfg = cfg.__class__(**{**cfg.__dict__, "orth_itp": orth_itp})
+
         # 1) Write MD parameters (md.mdp with correct nsteps)
         step_write_mdps(cfg, md_ns_override=md_ns)
 
@@ -2087,19 +1940,20 @@ def main(argv=None) -> None:
         # -------------------------------------------------------------
         # md continuation jobs DO have system.gro in OUT from parent job,
         # because md_jobs.py copies it into input/system.gro
-        system_gro = cfg.workdir / "system.gro"
+        start_gro = params.get("start_gro", "npt.gro")
+        structure = cfg.workdir / start_gro
+
         system_pdb = cfg.workdir / "system.pdb"
 
-        if system_gro.exists():
+        if structure.exists():
             run([
                 "gmx", "editconf",
-                "-f", str(system_gro),
+                "-f", str(structure),
                 "-o", str(system_pdb),
             ], cwd=cfg.workdir)
-            print("[MD-only] Generated system.pdb for visualization.")
+            print(f"[MD-only] Generated system.pdb from {structure.name}")
         else:
-            print("[MD-only] WARNING: system.gro not found, could not create system.pdb.")
-
+            print(f"[MD-only] WARNING: {structure} not found")
 
         # 3) Continue MD
         step_grompp_mdrun_md(cfg, nt=args.nt)
@@ -2313,8 +2167,6 @@ def main(argv=None) -> None:
     if not args.skip_ion_fix:
         step_fix_ions(cfg)
 
-    create_pull_index(cfg)
-
     if not args.skip_mdp_write:
         # Load MD duration override
         params_file = cfg.workdir.parent / "input" / "params.json"
@@ -2348,6 +2200,14 @@ def main(argv=None) -> None:
         step_grompp_mdrun_nvt(cfg, nt=args.nt)
         step_grompp_mdrun_npt(cfg, nt=args.nt)
         step_grompp_mdrun_md(cfg, nt=args.nt)
+        if preset == "m3_popc_full":
+            print("\n=== FULL PRESET: EM → NVT → NPT → MD ===")
+            step_grompp_mdrun_em(cfg, nt=args.nt)
+            step_grompp_mdrun_nvt(cfg, nt=args.nt)
+            step_grompp_mdrun_npt(cfg, nt=args.nt)
+            step_grompp_mdrun_md(cfg, nt=args.nt)
+            print("\nFULL PRESET FINISHED.")
+            return
         print("\nFULL PRESET FINISHED.")
         return
 
@@ -2359,6 +2219,16 @@ def main(argv=None) -> None:
 
     if args.do_npt:
         step_grompp_mdrun_npt(cfg, nt=args.nt)
+
+    # create topology for viewer
+    subprocess.run(
+        [
+            "gmx", "editconf",
+            "-f", str(cfg.workdir / "out" / "npt.gro"),
+            "-o", str(cfg.workdir / "out" / "system.pdb"),
+        ],
+        check=True,
+    )
 
     # if args.do_md:
     #     step_grompp_mdrun_md(cfg, nt=args.nt)
