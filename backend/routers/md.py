@@ -214,17 +214,22 @@ def open_chimerax(job_id: str):
     import re
 
     # ---------------------------------------------------------
-    # 1. Look for md.partXXXX.xtc files and pick the highest
+    # 1. Look for md/npt/nvt part trajectories
     # ---------------------------------------------------------
-    part_files = list(out_dir.glob("md.part*.xtc"))
+    part_files = []
+    part_files += list(out_dir.glob("md.part*.xtc"))
+    part_files += list(out_dir.glob("npt.part*.xtc"))
+    part_files += list(out_dir.glob("nvt.part*.xtc"))
 
     chosen = None
 
     if part_files:
+
         def part_index(path):
             m = re.search(r"\.part(\d+)\.", path.name)
             return int(m.group(1)) if m else -1
 
+        # highest part number = latest trajectory segment
         chosen = max(part_files, key=part_index)
 
     # ---------------------------------------------------------
