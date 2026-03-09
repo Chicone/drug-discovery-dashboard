@@ -39,6 +39,11 @@ import json
 
 MDP_DIR = Path(__file__).resolve().parent / "mdp_templates"
 
+# Eventually selected from the frontend, hard-coded for now
+# PULL_SCENARIO = "none"
+# PULL_SCENARIO = "lig_com"
+PULL_SCENARIO = "ring_only"
+# PULL_SCENARIO = "full_pose"
 
 # ------------------------ Ligand pull presets ------------------------
 
@@ -127,6 +132,43 @@ LIGAND_PULL_CASES = {
     #     "pull2_init": 0.40,
     #     "pull2_k": 50.0,
     # },
+}
+
+PULL_SCENARIOS = {
+
+    "none": {
+        "ncoords": 0
+    },
+
+    "ring_only": {
+        "ncoords": 1,
+        "groups": [
+            ("LIG_RING", "POCKET_COM")
+        ],
+        "k_eq": [300],
+        "k_md": [40]
+    },
+
+    "lig_com": {
+        "ncoords": 1,
+        "groups": [
+            ("LIG_COM", "POCKET_COM")
+        ],
+        "k_eq": [300],
+        "k_md": [80]
+    },
+
+    "full_pose": {
+        "ncoords": 3,
+        "groups": [
+            ("LIG_RING", "POCKET_COM"),
+            ("LIG_HB", "RES253_SC1"),
+            ("LIG_LAT", "RES169_BB")
+        ],
+        "k_eq": [300,300,300],
+        "k_md": [100,100,100]
+    }
+
 }
 
 # ------------------------------- Config ------------------------------
@@ -511,8 +553,8 @@ def step_martinize(cfg: PipelineConfig) -> PipelineConfig:
         "-o", top_name,
         "-ff", "martini3001",
         "-elastic",
-        "-ef", "250",
-        "-eu", "0.9",
+        "-ef", "500",
+        "-eu", "0.7",
         "-el", "0.5",
          "-name", cfg.protein_name,
         "-p", "backbone",
@@ -898,91 +940,97 @@ def step_write_mdps(
     # Pull blocks
     # -------------------------------------------------
 
-    pull_block_eq = f"""
+    ps = PULL_SCENARIOS[PULL_SCENARIO]
 
-; =======================
-;   RESTRAINTS (EQ)
-; =======================
+    pull_block_eq = build_pull_block(ps, "eq")
+    pull_block_md = build_pull_block(ps, "md")
 
-pull                    = yes
-pull_ncoords            = 3
-pull_ngroups            = 6
-
-pull_group1_name        = LIG_RING
-pull_group2_name        = POCKET_REF
-
-pull_group3_name        = LIG_HB
-pull_group4_name        = RES253_SC1
-
-pull_group5_name        = LIG_{lat_bead}
-pull_group6_name        = RES169_BB
-
-pull_coord1_type        = umbrella
-pull_coord1_geometry    = distance
-pull_coord1_groups      = 1 2
-pull_coord1_dim         = Y Y Y
-pull_coord1_k           = {pull1_k_eq:.1f}
-pull_coord1_start       = yes
-
-pull_coord2_type        = umbrella
-pull_coord2_geometry    = distance
-pull_coord2_groups      = 3 4
-pull_coord2_dim         = Y Y Y
-pull_coord2_k           = {pull2_k_eq:.1f}
-pull_coord2_start       = yes
-
-pull_coord3_type        = umbrella
-pull_coord3_geometry    = distance
-pull_coord3_groups      = 5 6
-pull_coord3_dim         = Y Y Y
-pull_coord3_k           = {pull3_k_eq:.1f}
-pull_coord3_start       = yes
-
-pull_pbc_ref_prev_step_com = yes
-"""
-
-    pull_block_md = f"""
-
-; =======================
-;   RESTRAINTS (MD)
-; =======================
-
-pull                    = yes
-pull_ncoords            = 3
-pull_ngroups            = 6
-
-pull_group1_name        = LIG_RING
-pull_group2_name        = POCKET_REF
-
-pull_group3_name        = LIG_HB
-pull_group4_name        = RES253_SC1
-
-pull_group5_name        = LIG_{lat_bead}
-pull_group6_name        = RES169_BB
-
-pull_coord1_type        = umbrella
-pull_coord1_geometry    = distance
-pull_coord1_groups      = 1 2
-pull_coord1_dim         = Y Y Y
-pull_coord1_k           = {pull1_k_md:.1f}
-pull_coord1_start       = yes
-
-pull_coord2_type        = umbrella
-pull_coord2_geometry    = distance
-pull_coord2_groups      = 3 4
-pull_coord2_dim         = Y Y Y
-pull_coord2_k           = {pull2_k_md:.1f}
-pull_coord2_start       = yes
-
-pull_coord3_type        = umbrella
-pull_coord3_geometry    = distance
-pull_coord3_groups      = 5 6
-pull_coord3_dim         = Y Y Y
-pull_coord3_k           = {pull3_k_md:.1f}
-pull_coord3_start       = yes
-
-pull_pbc_ref_prev_step_com = yes
-"""
+#     # this is for 3 pulls
+#     pull_block_eq = f"""
+#
+# ; =======================
+# ;   RESTRAINTS (EQ)
+# ; =======================
+#
+# pull                    = yes
+# pull_ncoords            = 3
+# pull_ngroups            = 6
+#
+# pull_group1_name        = LIG_RING
+# pull_group2_name        = POCKET_REF
+#
+# pull_group3_name        = LIG_HB
+# pull_group4_name        = RES253_SC1
+#
+# pull_group5_name        = LIG_{lat_bead}
+# pull_group6_name        = RES169_BB
+#
+# pull_coord1_type        = umbrella
+# pull_coord1_geometry    = distance
+# pull_coord1_groups      = 1 2
+# pull_coord1_dim         = Y Y Y
+# pull_coord1_k           = {pull1_k_eq:.1f}
+# pull_coord1_start       = yes
+#
+# pull_coord2_type        = umbrella
+# pull_coord2_geometry    = distance
+# pull_coord2_groups      = 3 4
+# pull_coord2_dim         = Y Y Y
+# pull_coord2_k           = {pull2_k_eq:.1f}
+# pull_coord2_start       = yes
+#
+# pull_coord3_type        = umbrella
+# pull_coord3_geometry    = distance
+# pull_coord3_groups      = 5 6
+# pull_coord3_dim         = Y Y Y
+# pull_coord3_k           = {pull3_k_eq:.1f}
+# pull_coord3_start       = yes
+#
+# pull_pbc_ref_prev_step_com = yes
+# """
+#
+#     pull_block_md = f"""
+#
+# ; =======================
+# ;   RESTRAINTS (MD)
+# ; =======================
+#
+# pull                    = yes
+# pull_ncoords            = 3
+# pull_ngroups            = 6
+#
+# pull_group1_name        = LIG_RING
+# pull_group2_name        = POCKET_REF
+#
+# pull_group3_name        = LIG_HB
+# pull_group4_name        = RES253_SC1
+#
+# pull_group5_name        = LIG_{lat_bead}
+# pull_group6_name        = RES169_BB
+#
+# pull_coord1_type        = umbrella
+# pull_coord1_geometry    = distance
+# pull_coord1_groups      = 1 2
+# pull_coord1_dim         = Y Y Y
+# pull_coord1_k           = {pull1_k_md:.1f}
+# pull_coord1_start       = yes
+#
+# pull_coord2_type        = umbrella
+# pull_coord2_geometry    = distance
+# pull_coord2_groups      = 3 4
+# pull_coord2_dim         = Y Y Y
+# pull_coord2_k           = {pull2_k_md:.1f}
+# pull_coord2_start       = yes
+#
+# pull_coord3_type        = umbrella
+# pull_coord3_geometry    = distance
+# pull_coord3_groups      = 5 6
+# pull_coord3_dim         = Y Y Y
+# pull_coord3_k           = {pull3_k_md:.1f}
+# pull_coord3_start       = yes
+#
+# pull_pbc_ref_prev_step_com = yes
+# """
 
     # -------------------------------------------------
     # Inject restraints
@@ -1545,7 +1593,7 @@ def create_pull_index(cfg: PipelineConfig, structure: Path) -> None:
 
       [ LIG_RING ]       = Adenine ORT beads
       [ LIG_<hb_bead> ] = ligand-specific H-bond bead (N05, N07, N01…)
-      [ POCKET_REF ]    = 168 aromatic ring (SC1+SC2+SC3)
+      [ POCKET_COM ]    = Residues defining the pocket (168, 169, 253, 278)
       [ RES253_SC1 ]    = residue 253 SC1 bead
     """
 
@@ -1592,6 +1640,7 @@ def create_pull_index(cfg: PipelineConfig, structure: Path) -> None:
         "r 168 & a SC1 | r 168 & a SC2 | r 168 & a SC3\n"
         "r 253 & a SC1\n"
         "r 169 & a BB\n"
+        "r 278 & a SC3\n"
         "q\n"
     )
 
@@ -1657,13 +1706,22 @@ def patch_pull_group_names(
             bead = name.replace("ORT_&_", "")
             renamed[f"LIG_{bead}"] = atoms
         elif "r_168_&_SC1_r_168_&_SC2_r_168_&_SC3" in name:
-            renamed["POCKET_REF"] = atoms
+            renamed["RES168_RING"] = atoms
         elif "r_253_&_SC1" in name:
             renamed["RES253_SC1"] = atoms
         elif "r_169_&_BB" in name:
             renamed["RES169_BB"] = atoms
+        elif "r_278_&_SC3" in name:
+            renamed["RES278_SC3"] = atoms
         else:
             renamed[name] = atoms
+
+    renamed["POCKET_COM"] = (
+            renamed["RES168_RING"]
+            + renamed["RES169_BB"]
+            + renamed["RES253_SC1"]
+            # + renamed["RES278_SC3"]
+    )
 
     # Build combined HB group explicitly from the single-bead groups
     hb_atoms = []
@@ -1803,7 +1861,35 @@ def check_ligand_protein_clash_pdb(
             f"[clash] WARNING: borderline contact {d_nm:.3f} nm < {min_ok_nm} nm"
         )
 
+def build_pull_block(ps, stage):
 
+    if ps["ncoords"] == 0:
+        return ""
+
+    k_list = ps["k_eq"] if stage == "eq" else ps["k_md"]
+
+    lines = []
+    lines.append("pull = yes")
+    lines.append(f"pull_ncoords = {ps['ncoords']}")
+    lines.append(f"pull_ngroups = {ps['ncoords'] * 2}")
+
+    gid = 1
+    for i, (g1, g2) in enumerate(ps["groups"], 1):
+        lines.append(f"pull_group{gid}_name = {g1}")
+        lines.append(f"pull_group{gid + 1}_name = {g2}")
+
+        lines.append(f"pull_coord{i}_type = umbrella")
+        lines.append(f"pull_coord{i}_geometry = distance")
+        lines.append(f"pull_coord{i}_groups = {gid} {gid + 1}")
+        lines.append(f"pull_coord{i}_dim = Y Y Y")
+        lines.append(f"pull_coord{i}_k = {k_list[i - 1]}")
+        lines.append(f"pull_coord{i}_start = yes")
+
+        gid += 2
+
+    lines.append("pull_pbc_ref_prev_step_com = yes")
+
+    return "\n".join(lines)
 
 
 # ------------------------------ Main ---------------------------------
@@ -2010,6 +2096,9 @@ def main(argv=None) -> None:
         cfg, args, CG_CACHE, scenario
     )
 
+    # # TEMPORARY: disable cache
+    # hit = False
+
     SKIP_LIG = hit  # skip ligand build if cache hit
     args.skip_martinize = hit
 
@@ -2059,7 +2148,7 @@ def main(argv=None) -> None:
             orth_itp,
             bond_factor=1.0,
             angle_factor=1.0,
-            dihedral_factor=0.3,
+            dihedral_factor=1.0,
             bond_k_min=0.0,
             angle_k_min=0.0,
             dihedral_k_min=0.0,
