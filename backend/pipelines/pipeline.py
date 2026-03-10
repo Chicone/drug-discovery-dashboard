@@ -145,8 +145,8 @@ PULL_SCENARIOS = {
         "groups": [
             ("LIG_RING", "POCKET_COM")
         ],
-        "k_eq": [300],
-        "k_md": [40]
+        "k_eq": [500],
+        "k_md": [200]
     },
 
     "lig_com": {
@@ -1638,8 +1638,10 @@ def create_pull_index(cfg: PipelineConfig, structure: Path) -> None:
         "r ORT & a N07\n"
         f"r ORT & a {lat_bead}\n"
         "r 168 & a SC1 | r 168 & a SC2 | r 168 & a SC3\n"
+        "r 168 & a SC1\n"
         "r 253 & a SC1\n"
         "r 169 & a BB\n"
+        "r 277 & a SC1\n"
         "r 278 & a SC3\n"
         "q\n"
     )
@@ -1707,20 +1709,26 @@ def patch_pull_group_names(
             renamed[f"LIG_{bead}"] = atoms
         elif "r_168_&_SC1_r_168_&_SC2_r_168_&_SC3" in name:
             renamed["RES168_RING"] = atoms
+        elif "r_168_&_SC1" in name:
+            renamed["RES168_SC1"] = atoms
         elif "r_253_&_SC1" in name:
             renamed["RES253_SC1"] = atoms
         elif "r_169_&_BB" in name:
             renamed["RES169_BB"] = atoms
+        elif "r_277_&_SC1" in name:
+            renamed["RES277_SC1"] = atoms
         elif "r_278_&_SC3" in name:
             renamed["RES278_SC3"] = atoms
         else:
             renamed[name] = atoms
 
     renamed["POCKET_COM"] = (
-            renamed["RES168_RING"]
+            renamed["RES168_SC1"]
+            # renamed["RES168_RING"]
             + renamed["RES169_BB"]
             + renamed["RES253_SC1"]
-            # + renamed["RES278_SC3"]
+            + renamed["RES277_SC1"]
+            + renamed["RES278_SC3"]
     )
 
     # Build combined HB group explicitly from the single-bead groups
@@ -1883,7 +1891,9 @@ def build_pull_block(ps, stage):
         lines.append(f"pull_coord{i}_groups = {gid} {gid + 1}")
         lines.append(f"pull_coord{i}_dim = Y Y Y")
         lines.append(f"pull_coord{i}_k = {k_list[i - 1]}")
-        lines.append(f"pull_coord{i}_start = yes")
+        lines.append(f"pull_coord{i}_start = no")
+        lines.append(f"pull_coord{i}_init = 0")
+        # lines.append(f"pull_coord{i}_start = yes")
 
         gid += 2
 
@@ -2191,7 +2201,7 @@ def main(argv=None) -> None:
                 orth_itp,
                 bond_factor=1,
                 angle_factor=1,
-                dihedral_factor=0.3,
+                dihedral_factor=1.0,
                 bond_k_min=0,
                 angle_k_min=0,
                 dihedral_k_min=0,
