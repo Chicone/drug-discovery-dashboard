@@ -42,7 +42,9 @@ MDP_DIR = Path(__file__).resolve().parent / "mdp_templates"
 # Eventually selected from the frontend, hard-coded for now
 # PULL_SCENARIO = "none"
 # PULL_SCENARIO = "lig_com"
-PULL_SCENARIO = "ring_only"
+# PULL_SCENARIO = "ring_plus_chain"
+PULL_SCENARIO = "ring_plus_ribose"
+# PULL_SCENARIO = "ring_only"
 # PULL_SCENARIO = "full_pose"
 
 # ------------------------ Ligand pull presets ------------------------
@@ -152,16 +154,36 @@ PULL_SCENARIOS = {
     "lig_com": {
         "ncoords": 1,
         "groups": [
-            ("LIG_COM", "POCKET_COM")
+            ("LIG_COM", "POCKET_COM1")
         ],
         "k_eq": [300],
         "k_md": [80]
     },
 
+    "ring_plus_ribose": {
+            "ncoords": 2,
+            "groups": [
+                ("LIG_RING", "POCKET_COM1"),
+                ("LIG_RIBOSE", "POCKET_COM2")
+            ],
+            "k_eq": [300, 300],
+            "k_md": [100, 100]
+        },
+
+    "ring_plus_chain": {
+        "ncoords": 2,
+        "groups": [
+            ("LIG_RING", "POCKET_COM1"),
+            ("LIG_CHAIN", "POCKET_COM2")
+        ],
+        "k_eq": [300, 300],
+        "k_md": [100, 100]
+    },
+
     "full_pose": {
         "ncoords": 3,
         "groups": [
-            ("LIG_RING", "POCKET_COM"),
+            ("LIG_RING", "POCKET_COM1"),
             ("LIG_HB", "RES253_SC1"),
             ("LIG_LAT", "RES169_BB")
         ],
@@ -1636,13 +1658,21 @@ def create_pull_index(cfg: PipelineConfig, structure: Path) -> None:
         "r ORT & a N05\n"
         "r ORT & a N06\n"
         "r ORT & a N07\n"
-        f"r ORT & a {lat_bead}\n"
+        "r ORT & a P01\n"
+        "r ORT & a P02\n"
+        "r ORT & a P03\n"
+        "r ORT & a N01\n"
+       f"r ORT & a {lat_bead}\n"
         "r 168 & a SC1 | r 168 & a SC2 | r 168 & a SC3\n"
         "r 168 & a SC1\n"
         "r 253 & a SC1\n"
         "r 169 & a BB\n"
         "r 277 & a SC1\n"
         "r 278 & a SC3\n"
+        "r 250 & a SC1\n"
+        "r 278 & a SC1\n"
+        
+        
         "q\n"
     )
 
@@ -1719,16 +1749,24 @@ def patch_pull_group_names(
             renamed["RES277_SC1"] = atoms
         elif "r_278_&_SC3" in name:
             renamed["RES278_SC3"] = atoms
+        elif "r_250_&_SC1" in name:
+            renamed["RES250_SC1"] = atoms
+        elif "r_278_&_SC1" in name:
+            renamed["RES278_SC1"] = atoms
         else:
             renamed[name] = atoms
 
-    renamed["POCKET_COM"] = (
+    renamed["POCKET_COM1"] = (
             renamed["RES168_SC1"]
             # renamed["RES168_RING"]
             + renamed["RES169_BB"]
             + renamed["RES253_SC1"]
             + renamed["RES277_SC1"]
             + renamed["RES278_SC3"]
+    )
+    renamed["POCKET_COM2"] = (
+            renamed["RES250_SC1"]
+            + renamed["RES278_SC1"]
     )
 
     # Build combined HB group explicitly from the single-bead groups
@@ -1749,6 +1787,24 @@ def patch_pull_group_names(
     if ring_atoms:
         ring_atoms = sorted(set(ring_atoms), key=int)
         renamed["LIG_RING"] = ring_atoms
+
+    # Build NECA ribose group (P1, P2, P3)
+    chain_atoms = []
+    for bead in ["P01"]:
+        chain_atoms.extend(renamed.get(f"LIG_{bead}", []))
+
+    if chain_atoms:
+        chain_atoms = sorted(set(chain_atoms), key=int)
+        renamed["LIG_RIBOSE"] = chain_atoms
+
+    # Build NECA chain group (N01)
+    chain_atoms = []
+    for bead in ["N01"]:
+        chain_atoms.extend(renamed.get(f"LIG_{bead}", []))
+
+    if chain_atoms:
+        chain_atoms = sorted(set(chain_atoms), key=int)
+        renamed["LIG_CHAIN"] = chain_atoms
 
     # Write back
     out = []
