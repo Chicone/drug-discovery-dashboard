@@ -8,7 +8,9 @@ import {
   TextField,
   MenuItem,
   Divider,
-  Tooltip
+  Tooltip,
+  Checkbox,
+  FormControlLabel
 } from "@mui/material";
 
 
@@ -23,7 +25,11 @@ function MolecularDynamics() {
   const finishingRef = useRef(false);
   const finishEmptyTicksRef = useRef(0);
 
-
+  const [aaTimePs, setAaTimePs] = useState(0);
+  const [aaRunEm, setAaRunEm] = useState(true);
+  const [aaRunNvt, setAaRunNvt] = useState(true);
+  const [aaRunNpt, setAaRunNpt] = useState(true);
+  const [isBackmapping, setIsBackmapping] = useState(false);
 
   // Optional ligand inputs
   const [orthostericFile, setOrthostericFile] = useState(null);
@@ -435,6 +441,61 @@ async function submitJob({ preset, workflow, parentJobId = null }) {
 }
 
 
+
+async function createAaReconstructionJob() {
+  const parentId = selectedParentJobId || jobId;
+
+  if (!parentId) {
+    setError("Please select a parent CG/MD job first.");
+    return;
+  }
+
+  if (!Number.isFinite(Number(aaTimePs)) || Number(aaTimePs) < 0) {
+    setError("Please provide a valid frame time in ps.");
+    return;
+  }
+
+  setError(null);
+  setIsBackmapping(true);
+
+  try {
+    const res = await fetch(`/api/md/${parentId}/backmap`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        time_ps: Number(aaTimePs),
+        run_em: aaRunEm,
+        run_nvt: aaRunNvt,
+        run_npt: aaRunNpt,
+      }),
+    });
+
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(txt || `Failed to start AA reconstruction (${res.status})`);
+    }
+
+    const data = await res.json();
+
+    if (!data?.job_id) {
+      throw new Error("Backend did not return a job_id for AA reconstruction.");
+    }
+
+    setSelectedParentJobId(data.job_id);
+    setLastBuildJobId(data.job_id);
+    localStorage.setItem("lastBuildJobId", data.job_id);
+
+    await openJob(data.job_id);
+    loadRecentJobs(historyLimit);
+  } catch (e) {
+    setError(e.message || String(e));
+  } finally {
+    setIsBackmapping(false);
+  }
+}
+
 async function createBuildJob() {
   const isBuildOnly = presetBuild.endsWith("_build");
 
@@ -608,6 +669,12 @@ async function createRunJob() {
   reader.readAsText(file);
 }
 
+const canBackmap =
+  !!(selectedParentJobId || jobId) &&
+  !isBackmapping &&
+  Number.isFinite(Number(aaTimePs)) &&
+  Number(aaTimePs) >= 0;
+
   const canSubmit =
     (!needsProtein || !!proteinFile) &&
     (!needsOrth || (!!orthostericFile && !!orthostericSmiles?.trim())) &&
@@ -706,8 +773,11 @@ return (
                   >
                     {/* Left: job info */}
                     <Box
-                      onClick={() => openJob(j.job_id)}
-                      sx={{
+                        onClick={() => {
+                          setSelectedParentJobId(j.job_id);
+                          openJob(j.job_id);
+                        }}
+                        sx={{
                         flex: 1,
                         minWidth: 0,
                         overflow: "hidden",
@@ -1024,6 +1094,72 @@ return (
           </Button>
 
           <Divider sx={{ borderColor: "#333" }} />
+
+          <Divider sx={{ borderColor: "#333" }} />
+
+        <Typography variant="subtitle1">AA reconstruction</Typography>
+
+        <Typography variant="body2" sx={{ color: "#aaa", maxWidth: 700 }}>
+          Reconstruct an atomistic system from a selected Martini/CG job at a given frame time.
+        </Typography>
+
+        <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="center">
+          <TextField
+            label="Frame time (ps)"
+            type="number"
+            value={aaTimePs}
+            onChange={(e) => setAaTimePs(Number(e.target.value))}
+            size="small"
+            sx={{ width: 160 }}
+            inputProps={{ min: 0, step: 1000 }}
+          />
+
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={aaRunEm}
+                onChange={(e) => setAaRunEm(e.target.checked)}
+              />
+            }
+            label="EM"
+          />
+
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={aaRunNvt}
+                onChange={(e) => setAaRunNvt(e.target.checked)}
+              />
+            }
+            label="NVT"
+          />
+
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={aaRunNpt}
+                onChange={(e) => setAaRunNpt(e.target.checked)}
+              />
+            }
+            label="NPT"
+          />
+
+          <Button
+            variant="outlined"
+            onClick={createAaReconstructionJob}
+            disabled={!canBackmap}
+            sx={{ minWidth: 170 }}
+          >
+            {isBackmapping ? "Starting..." : "Backmap to AA"}
+          </Button>
+        </Stack>
+
+        <Typography variant="caption" sx={{ color: "#888", display: "block" }}>
+          Source job: {selectedParentJobId || jobId || "none selected"}
+        </Typography>
+
+        <Divider sx={{ borderColor: "#333" }} />
+
 
           {/* Run MD */}
           <Typography variant="subtitle1">Run MD</Typography>
