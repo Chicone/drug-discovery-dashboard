@@ -17,6 +17,7 @@ from backend.services.md_jobs import (
 )
 from backend.services.md_jobs import run_cgmd_setup_job
 from backend.services.md_helpers import MD_RUNS_DIR
+from backend.services.md_jobs import create_backmap_job
 
 import subprocess
 
@@ -38,6 +39,12 @@ class MartiniSetupRequest(BaseModel):
     do_nvt: bool = False
     do_npt: bool = False
     do_md: bool = False
+
+class BackmapRequest(BaseModel):
+    time_ps: float = 0.0
+    run_em: bool = True
+    run_nvt: bool = True
+    run_npt: bool = True
 
 @router.post("/run-cgmd-setup")
 def run_cgmd_setup(request: MartiniSetupRequest):
@@ -202,44 +209,98 @@ def get_log(job_id: str, offset: int = 0):
 
 @router.post("/{job_id}/open-chimerax")
 def open_chimerax(job_id: str):
+    import re
+    import subprocess
+    from pathlib import Path
 
     base = _md_job_dir(job_id)
-
-    topology = base / "out" / "system.pdb"
     out_dir = base / "out"
 
-    if not topology.exists():
-        raise HTTPException(status_code=404, detail="Topology not found")
-
-    import re
+    if not out_dir.exists():
+        raise HTTPException(status_code=404, detail="Job out/ directory not found")
 
     # ---------------------------------------------------------
-    # 1. Look for md/npt/nvt part trajectories
+    # 1. Decide which structure to open
+    #    Prefer AA backmapped structure if present
+    # ---------------------------------------------------------
+    topology = None
+    structure_kind = None
+
+    aa_backmapped_pdb = out_dir / "backmapped.pdb"
+    aa_backmapped_gro = out_dir / "backmapped.gro"
+    aa_frame_gro = out_dir / "frame.gro"
+    cg_system_pdb = out_dir / "system.pdb"
+
+    if aa_backmapped_pdb.exists():
+        topology = aa_backmapped_pdb
+        structure_kind = "aa_backmapped_pdb"
+
+    elif aa_backmapped_gro.exists():
+        # Convert GRO -> PDB for ChimeraX
+        aa_backmapped_pdb = out_dir / "backmapped.pdb"
+
+        subprocess.run(
+            [
+                "gmx", "editconf",
+                "-f", str(aa_backmapped_gro),
+                "-o", str(aa_backmapped_pdb),
+            ],
+            check=True,
+        )
+
+        topology = aa_backmapped_pdb
+        structure_kind = "aa_backmapped_gro"
+
+    elif aa_frame_gro.exists():
+        aa_frame_pdb = out_dir / "frame.pdb"
+
+        subprocess.run(
+            [
+                "gmx", "editconf",
+                "-f", str(aa_frame_gro),
+                "-o", str(aa_frame_pdb),
+            ],
+            check=True,
+        )
+
+        topology = aa_frame_pdb
+        structure_kind = "aa_frame_gro"
+
+    elif cg_system_pdb.exists():
+        topology = cg_system_pdb
+        structure_kind = "cg_system_pdb"
+
+    else:
+        raise HTTPException(
+            status_code=404,
+            detail="No structure file found (expected backmapped.gro/pdb, frame.gro, or system.pdb)",
+        )
+
+    # ---------------------------------------------------------
+    # 2. Look for trajectory if present
+    #    This is optional for AA jobs
     # ---------------------------------------------------------
     part_files = []
     part_files += list(out_dir.glob("md.part*.xtc"))
     part_files += list(out_dir.glob("npt.part*.xtc"))
     part_files += list(out_dir.glob("nvt.part*.xtc"))
+    part_files += list(out_dir.glob("em.part*.xtc"))
 
     chosen = None
 
     if part_files:
-
         def part_index(path):
             m = re.search(r"\.part(\d+)\.", path.name)
             return int(m.group(1)) if m else -1
 
-        # highest part number = latest trajectory segment
         chosen = max(part_files, key=part_index)
 
-    # ---------------------------------------------------------
-    # 2. Fallbacks if no part files exist
-    # ---------------------------------------------------------
     else:
         candidates = [
             "md.xtc",
             "npt.xtc",
             "nvt.xtc",
+            "em.xtc",
         ]
 
         for name in candidates:
@@ -249,27 +310,44 @@ def open_chimerax(job_id: str):
                 break
 
     # ---------------------------------------------------------
-    # 3. Fail if nothing found
+    # 3. Launch ChimeraX
     # ---------------------------------------------------------
-    if chosen is None:
-        raise HTTPException(status_code=404, detail="No trajectory file found")
-
-    from pathlib import Path
-
     script = Path("~/PyCharm/ddd/backend/data/chimera/view.cxc").expanduser()
 
-    subprocess.Popen([
+    cmd = [
         "/Applications/ChimeraX-1.11.1.app/Contents/MacOS/ChimeraX",
         str(topology),
-        str(script),
-        str(chosen)
-    ])
+    ]
+
+    # Only add script + trajectory if trajectory exists
+    if chosen is not None:
+        cmd += [str(script), str(chosen)]
+
+    subprocess.Popen(cmd)
 
     return {
         "status": "launched",
-        "trajectory": chosen.name
+        "structure": topology.name,
+        "structure_kind": structure_kind,
+        "trajectory": chosen.name if chosen is not None else None,
     }
 
+@router.post("/{job_id}/backmap")
+def backmap_md_job(job_id: str, request: BackmapRequest):
+    try:
+        return create_backmap_job(
+            parent_job_id=job_id,
+            time_ps=request.time_ps,
+            run_em=request.run_em,
+            run_nvt=request.run_nvt,
+            run_npt=request.run_npt,
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 

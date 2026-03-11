@@ -296,6 +296,51 @@ async function openChimera(jobId) {
 }
 
 
+async function createAaReconstructionJob() {
+  const parentId = selectedParentJobId || jobId;
+
+  if (!parentId) {
+    setError("Please select a parent MD job first.");
+    return;
+  }
+
+  setError(null);
+  setIsBackmapping(true);
+
+  try {
+    const res = await fetch(`/api/md/${parentId}/backmap`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        time_ps: Number(aaTimePs),
+        run_em: aaRunEm,
+        run_nvt: aaRunNvt,
+        run_npt: aaRunNpt,
+      }),
+    });
+
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(txt || `Failed to start AA reconstruction (${res.status})`);
+    }
+
+    const data = await res.json();
+
+    if (!data?.job_id) {
+      throw new Error("Backend did not return a job_id.");
+    }
+
+    openJob(data.job_id);
+    loadRecentJobs(historyLimit);
+
+  } catch (e) {
+    setError(e.message || String(e));
+  } finally {
+    setIsBackmapping(false);
+  }
+}
 
 
   function workflowFromRunPreset(preset) {

@@ -14,7 +14,7 @@ BACKWARD = (
     .parents[3] / "tools" / "backward" / "backward.py"
 )
 
-from paths import cg_out_dir
+from .paths import cg_out_dir
 def run_backmapping(job_id: str) -> Path:
     """
     Convert a Martini frame to an atomistic structure

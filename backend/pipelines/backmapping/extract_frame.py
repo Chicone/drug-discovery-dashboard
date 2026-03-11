@@ -8,14 +8,28 @@ from .paths import (
     aa_prep_dir,
 )
 
+import subprocess
+from pathlib import Path
 
-def extract_frame(job_id: str, time_ps: float) -> Path:
+from .paths import cg_xtc, cg_tpr, extracted_frame_path
+
+
+def extract_frame(
+    job_id: str,
+    time_ps: float,
+    traj_path: Path | None = None,
+    tpr_path: Path | None = None,
+) -> Path:
     """
-    Extract a frame from a Martini trajectory using gmx trjconv.
+    Extract one frame from a CG trajectory at time_ps.
+
+    If traj_path or tpr_path are given, use them directly.
+    Otherwise fall back to the default path helpers.
     """
 
-    traj = cg_xtc(job_id)
-    tpr = cg_tpr(job_id)
+    traj = traj_path if traj_path is not None else cg_xtc(job_id)
+    tpr = tpr_path if tpr_path is not None else cg_tpr(job_id)
+    out = extracted_frame_path(job_id)
 
     if not traj.exists():
         raise RuntimeError(f"Trajectory not found: {traj}")
@@ -23,30 +37,31 @@ def extract_frame(job_id: str, time_ps: float) -> Path:
     if not tpr.exists():
         raise RuntimeError(f"TPR not found: {tpr}")
 
-    out_dir = aa_prep_dir(job_id)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    frame_out = extracted_frame_path(job_id)
+    out.parent.mkdir(parents=True, exist_ok=True)
 
     cmd = [
-        "gmx",
-        "trjconv",
+        "gmx", "trjconv",
         "-f", str(traj),
         "-s", str(tpr),
-        "-o", str(frame_out),
+        "-o", str(out),
         "-dump", str(time_ps),
     ]
 
     proc = subprocess.Popen(
         cmd,
         stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
     )
-
-    # select "System" group automatically
-    proc.communicate("0\n")
+    stdout, _ = proc.communicate("0\n")
 
     if proc.returncode != 0:
-        raise RuntimeError("gmx trjconv failed")
+        raise RuntimeError(
+            f"gmx trjconv failed with code {proc.returncode}\n{stdout}"
+        )
 
-    return frame_out
+    if not out.exists():
+        raise RuntimeError(f"Frame extraction failed, output not created: {out}")
+
+    return out
