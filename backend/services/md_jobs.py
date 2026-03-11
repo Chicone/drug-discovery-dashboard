@@ -39,6 +39,7 @@ PIPELINE_BY_WORKFLOW = {
     "build_and_equilibrate": "backend.pipelines.pipeline",
     "run_md": "backend.pipelines.pipeline",
     "build_and_run_full": "backend.pipelines.pipeline",
+    "backmap_aa": "backend.pipelines.aa_pipeline",
 }
 
 # ============================================================
@@ -595,7 +596,6 @@ def _extract_orthosteric_from_pdb(
 # ============================================================
 
 def _launch_md_local(job_dir: Path) -> None:
-
     print(">>> RUNTIME: _launch_md_local() CALLED")
 
     input_dir = job_dir / "input"
@@ -614,31 +614,43 @@ def _launch_md_local(job_dir: Path) -> None:
 
     job_id = job_dir.name
 
-
-    input_dir = job_dir / "input"
     cmd = [
         sys.executable,
         "-m", module,
         "--workdir", str(job_dir / "out"),
-        "--aa_pdb", str(input_dir / params["files"]["protein_pdb"]),
     ]
 
-    nt = params.get("gmx", {}).get("nt", 1)
-    cmd += ["--nt", str(nt)]
+    # -------------------------------------------------
+    # Normal CG / MD workflows only
+    # -------------------------------------------------
+    if workflow != "backmap_aa":
+        files = params.get("files", {})
 
-    orth = params["files"].get("orthosteric_ligand")
-    if orth:
-        cmd += ["--orthosteric_pdb", str(input_dir / orth)]
+        protein_pdb = files.get("protein_pdb")
+        if not protein_pdb:
+            raise RuntimeError("Missing files.protein_pdb in params.json")
 
-    orth_smiles = params.get("orthosteric_smiles")
-    if orth_smiles:
-        cmd += ["--orthosteric_smiles", orth_smiles]
+        cmd += ["--aa_pdb", str(input_dir / protein_pdb)]
+
+        orth = files.get("orthosteric_ligand")
+        if orth:
+            cmd += ["--orthosteric_pdb", str(input_dir / orth)]
+
+        orth_smiles = params.get("orthosteric_smiles")
+        if orth_smiles:
+            cmd += ["--orthosteric_smiles", orth_smiles]
+
+    if workflow != "backmap_aa":
+        nt = params.get("gmx", {}).get("nt", 1)
+        cmd += ["--nt", str(nt)]
 
     env = os.environ.copy()
     env["PYTHONPATH"] = str(PROJECT_ROOT)
-    env["MARTINI_FF"] = "/Users/luiscamara/miniforge3/envs/drugdash/martini_v300"
+    env["MARTINI_FF"] = (
+        "/Users/luiscamara/miniforge3/envs/drugdash/martini_v300"
+    )
 
-    if "MARTINI_FF" in env:
+    if "MARTINI_FF" in env and workflow != "backmap_aa":
         cmd += ["--martini_ff", env["MARTINI_FF"]]
 
     if workflow == "build_and_run_full":
@@ -646,15 +658,15 @@ def _launch_md_local(job_dir: Path) -> None:
 
     preset = params.get("preset", "")
 
-    if preset.endswith("_build"):
-        pass
-    elif preset.endswith("_em"):
-        cmd.append("--do-em")
-    elif preset.endswith("_eq"):
-        cmd.extend(["--do-em", "--do-nvt", "--do-npt"])
-    # elif workflow == "run_md":
-    elif preset.endswith("_prod") or workflow == "run_md":
-        cmd.append("--do-md")
+    if workflow != "backmap_aa":
+        if preset.endswith("_build"):
+            pass
+        elif preset.endswith("_em"):
+            cmd.append("--do-em")
+        elif preset.endswith("_eq"):
+            cmd.extend(["--do-em", "--do-nvt", "--do-npt"])
+        elif preset.endswith("_prod") or workflow == "run_md":
+            cmd.append("--do-md")
 
     _write_json(job_dir / "status.json", {"status": "running"})
 
@@ -985,7 +997,166 @@ def run_cgmd_setup_job(request):
     run_pipeline(args)
     return {"status": "ok"}
 
+def create_backmap_job(
+    parent_job_id: str,
+    time_ps: float,
+    run_em: bool = True,
+    run_nvt: bool = True,
+    run_npt: bool = True,
+):
+    """
+    Create a child AA-reconstruction job from an existing CG/MD job.
+    Uses trajectory extraction if available, otherwise falls back to static system.gro.
+    """
 
+    try:
+        parent_dir = _md_job_dir(parent_job_id)
+        if not parent_dir.exists():
+            return JSONResponse(
+                status_code=404,
+                content={"error": f"Parent job not found: {parent_job_id}"},
+            )
+
+        parent_out = parent_dir / "out"
+        if not parent_out.exists():
+            return JSONResponse(
+                status_code=400,
+                content={"error": f"Parent job has no out/ directory: {parent_job_id}"},
+            )
+
+        MD_RUNS_DIR.mkdir(parents=True, exist_ok=True)
+
+        job_id = f"aa_{uuid.uuid4().hex[:12]}"
+        job_dir = _md_job_dir(job_id)
+        job_dir.mkdir(exist_ok=False)
+
+        input_dir = job_dir / "input"
+        out_dir = job_dir / "out"
+        _safe_mkdir(input_dir)
+        _safe_mkdir(out_dir)
+
+        # -------------------------------------------------
+        # Copy candidate parent files needed for AA reconstruction
+        # -------------------------------------------------
+        files_to_copy = [
+            "system.gro",
+            "system.top",
+            "em.tpr",
+            "nvt.tpr",
+            "npt.tpr",
+            "md.tpr",
+            "npt.gro",
+            "nvt.gro",
+            "em.gro",
+            "md.gro",
+            "npt.cpt",
+            "nvt.cpt",
+            "em.cpt",
+            "md.cpt",
+        ]
+
+        for fname in files_to_copy:
+            src = parent_out / fname
+            if src.exists():
+                shutil.copy2(src, out_dir / fname)
+
+        # Copy all ITPs from parent out/
+        for itp in parent_out.glob("*.itp"):
+            shutil.copy2(itp, out_dir / itp.name)
+
+        # Copy trajectory parts too
+        for xtc in parent_out.glob("*.xtc"):
+            shutil.copy2(xtc, out_dir / xtc.name)
+
+        # -------------------------------------------------
+        # Decide whether we have a trajectory
+        # -------------------------------------------------
+        xtc_candidates = sorted(parent_out.glob("md.part*.xtc"))
+        if xtc_candidates:
+            # highest md.partXXXX.xtc
+            def part_index(path: Path) -> int:
+                m = re.search(r"\.part(\d+)\.", path.name)
+                return int(m.group(1)) if m else -1
+
+            best_xtc = max(xtc_candidates, key=part_index).name
+        else:
+            best_xtc = None
+            for fname in ["md.xtc", "npt.xtc", "nvt.xtc"]:
+                if (parent_out / fname).exists():
+                    best_xtc = fname
+                    break
+
+        static_gro = None
+        for fname in ["system.gro", "npt.gro", "nvt.gro", "em.gro", "md.gro"]:
+            if (parent_out / fname).exists():
+                static_gro = fname
+                break
+
+        if best_xtc is None and static_gro is None:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Parent job has neither trajectory nor usable .gro"},
+            )
+
+        created_at = datetime.now(
+            ZoneInfo("Europe/Paris")
+        ).isoformat(timespec="seconds")
+
+        run_record = {
+            "job_id": job_id,
+            "created_at": created_at,
+            "preset": "aa_backmap",
+            "scenario": "aa_reconstruction",
+            "workflow": "backmap_aa",
+            "parent_job_id": parent_job_id,
+            "time_ps": time_ps,
+            "run_em": run_em,
+            "run_nvt": run_nvt,
+            "run_npt": run_npt,
+        }
+
+        _write_json(job_dir / "run.json", run_record)
+        _write_json(job_dir / "status.json", {"status": "queued"})
+        (job_dir / "log.txt").write_text("", encoding="utf-8")
+
+        params = {
+            "workflow": "backmap_aa",
+            "parent_job_id": parent_job_id,
+            "time_ps": float(time_ps),
+            "run_em": bool(run_em),
+            "run_nvt": bool(run_nvt),
+            "run_npt": bool(run_npt),
+            "source_xtc": best_xtc,
+            "source_static_gro": static_gro,
+            "source_tpr": "md.tpr" if (parent_out / "md.tpr").exists() else None,
+            "comment": f"AA reconstruction from parent {parent_job_id}",
+            "jop_type": "aa"
+        }
+
+        _write_json(input_dir / "params.json", params)
+
+        try:
+            _launch_md_local(job_dir)
+            _write_json(job_dir / "status.json", {"status": "running"})
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            (job_dir / "log.txt").write_text(
+                "FAILED TO LAUNCH AA BACKMAP JOB\n\n"
+                f"Exception: {repr(e)}\n\n"
+                f"Traceback:\n{tb}\n",
+                encoding="utf-8",
+            )
+            _write_json(job_dir / "status.json", {"status": "error", "error": str(e)})
+            return JSONResponse(
+                status_code=500,
+                content={"error": f"Failed to launch AA backmap job: {e}"},
+            )
+
+        return JSONResponse({"job_id": job_id})
+
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 

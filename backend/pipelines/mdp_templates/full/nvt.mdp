@@ -50,6 +50,8 @@ lincs-iter  = 2
 ; ----- COM motion -----
 comm-mode               = Linear
 comm-grps               = System
+nstcomm = 500
+
 
 ; ----- Output control -----
 nstxout-compressed      = 1000
