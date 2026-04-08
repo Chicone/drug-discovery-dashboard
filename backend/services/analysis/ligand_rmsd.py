@@ -35,11 +35,24 @@ def compute_ligand_rmsd_single(job_dir: Path, ligand_resname="ORT"):
         if system.exists():
             break
 
-    traj = out_dir / "md.xtc"
+    traj = None
 
-    if not traj.exists():
+    preferred = [
+        "md_fit.xtc",
+        "md_centered.xtc",
+        "md_nojump.xtc",
+        "md_whole.xtc",
+        "md.xtc",
+    ]
 
-        # Look for continuation parts: md.partXXXX.xtc
+    for name in preferred:
+        p = out_dir / name
+        if p.exists() and p.stat().st_size > 0:
+            traj = p
+            print(f"[RMSD] Using processed trajectory: {p.name}")
+            break
+
+    if traj is None:
         import re
 
         part_files = list(out_dir.glob("md.part*.xtc"))
@@ -47,18 +60,15 @@ def compute_ligand_rmsd_single(job_dir: Path, ligand_resname="ORT"):
         if not part_files:
             raise FileNotFoundError(
                 f"No trajectory found in {out_dir} "
-                "(md.xtc or md.partXXXX.xtc)"
+                f"({', '.join(preferred)} or md.partXXXX.xtc)"
             )
 
         def part_index(path):
             m = re.search(r"\.part(\d+)\.xtc", path.name)
             return int(m.group(1)) if m else -1
 
-        latest_part = max(part_files, key=part_index)
-
-        print(f"[RMSD] Using continuation trajectory: {latest_part.name}")
-
-        traj =  latest_part
+        traj = max(part_files, key=part_index)
+        print(f"[RMSD] Using continuation trajectory: {traj.name}")
 
     print("SYSTEM:", system)
     print("SYSTEM EXISTS:", system.exists())
@@ -90,12 +100,6 @@ def compute_ligand_rmsd_single(job_dir: Path, ligand_resname="ORT"):
 
     # Backbone atoms for alignment
     backbone = detect_backbone_atoms(t)
-
-    # Build a frozen 1-frame protein-backbone reference WITHOUT atom_slice
-    ref_bb = md.Trajectory(
-        xyz=t.xyz[0:1, backbone, :].copy(),
-        topology=t.topology.subset(backbone)
-    )
 
     # Align entire trajectory using the frozen protein reference
     t.superpose(t, 0, atom_indices=backbone)
