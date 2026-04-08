@@ -196,19 +196,24 @@ def compute_activation_metrics_multi(
         # detect trajectory
         traj_file = None
 
-        parts = sorted(out.glob("md.part*.xtc"))
-        if parts:
-            traj_file = parts[-1]
+        # Prefer processed analysis trajectories first
+        for name in [
+            "md_fit.xtc",
+            "md_centered.xtc",
+            "md_nojump.xtc",
+            "md_whole.xtc",
+            "md.xtc",
+        ]:
+            p = out / name
+            if p.exists() and p.stat().st_size > 0:
+                traj_file = p
+                break
 
+        # Fallback to raw continuation files only if nothing better exists
         if traj_file is None:
-            for name in [
-                "md_nojump.xtc", "md_centered.xtc", "md_fit.xtc",
-                "md_pbc.xtc", "md_unwrapped.xtc", "md.xtc",
-            ]:
-                p = out / name
-                if p.exists() and p.stat().st_size > 0:
-                    traj_file = p
-                    break
+            parts = sorted(out.glob("md.part*.xtc"))
+            if parts:
+                traj_file = parts[-1]
 
         if traj_file is None:
             raise RuntimeError(f"[{job_id}] No trajectory found in {out}")
@@ -399,25 +404,26 @@ def load_job_traj(job_dir):
     # -------------------------
     traj_file = None
 
-    # 1) continuation files
-    part_files = sorted((job_dir / "out").glob("md.part*.xtc"))
-    if part_files:
-        traj_file = part_files[-1]
+    out = job_dir / "out"
 
-    # 2) fallback standard names
+    # 1) prefer processed analysis trajectories
+    for name in [
+        "md_fit.xtc",
+        "md_centered.xtc",
+        "md_nojump.xtc",
+        "md_whole.xtc",
+        "md.xtc",
+    ]:
+        p = out / name
+        if p.exists() and p.stat().st_size > 0:
+            traj_file = p
+            break
+
+    # 2) fallback to continuation files only if needed
     if traj_file is None:
-        for name in [
-            "md_nojump.xtc",
-            "md_centered.xtc",
-            "md_fit.xtc",
-            "md_pbc.xtc",
-            "md_unwrapped.xtc",
-            "md.xtc",
-        ]:
-            p = job_dir / "out" / name
-            if p.exists() and p.stat().st_size > 0:
-                traj_file = p
-                break
+        part_files = sorted(out.glob("md.part*.xtc"))
+        if part_files:
+            traj_file = part_files[-1]
 
     if traj_file is None:
         raise RuntimeError(f"[{job_id}] No trajectory found in {job_dir}/out")

@@ -87,28 +87,28 @@ def compute_ligand_com_multi(job_dirs):
         if not system.exists():
             raise RuntimeError(f"Missing npt.gro for job {job_id}")
 
-        # ---- Trajectory detection (same as RMSD) ----
+        # ---- Trajectory detection ----
         traj_file = None
+        out_dir = job_dir / "out"
 
-        # 1️⃣ continuation files
-        part_files = sorted((job_dir / "out").glob("md.part*.xtc"))
-        if part_files:
-            traj_file = part_files[-1]
+        # 1 prefer processed trajectories first
+        for name in [
+            "md_fit.xtc",
+            "md_centered.xtc",
+            "md_nojump.xtc",
+            "md_whole.xtc",
+            "md.xtc",
+        ]:
+            p = out_dir / name
+            if p.exists() and p.stat().st_size > 0:
+                traj_file = p
+                break
 
-        # 2️⃣ fallback standard names
-        if traj_file is None:
-            for name in [
-                "md_nojump.xtc",
-                "md_centered.xtc",
-                "md_fit.xtc",
-                "md_pbc.xtc",
-                "md_unwrapped.xtc",
-                "md.xtc",
-            ]:
-                p = job_dir / "out" / name
-                if p.exists() and p.stat().st_size > 0:
-                    traj_file = p
-                    break
+            # 2 fallback to raw continuation files only if needed
+            if traj_file is None:
+                part_files = sorted(out_dir.glob("md.part*.xtc"))
+                if part_files:
+                    traj_file = part_files[-1]
 
         if traj_file is None:
             raise RuntimeError(f"No trajectory found for job {job_id}")

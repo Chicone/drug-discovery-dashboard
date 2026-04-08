@@ -18,11 +18,10 @@ def _pick_traj_file(job_dir: Path) -> Path:
 
     # Preferred files
     preferred = [
-        "md_nojump.xtc",
         "md_fit.xtc",
         "md_centered.xtc",
-        "md_pbc.xtc",
-        "md_unwrapped.xtc",
+        "md_nojump.xtc",
+        "md_whole.xtc",
         "md.xtc",
     ]
 
