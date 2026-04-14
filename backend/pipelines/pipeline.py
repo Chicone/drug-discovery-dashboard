@@ -425,46 +425,8 @@ def patch_virtual_site_masses(itp_path: Path):
 
 from pathlib import Path
 
-def patch_ligand_20pc(itp_path: Path):
-    """
-    Reduce ONLY dihedral force constants to 10% of original.
-    Do NOT modify angles.
-    Do NOT modify equilibrium angles.
-    """
-
-    if not itp_path.exists():
-        raise FileNotFoundError(f"Cannot patch missing ITP: {itp_path}")
-
-    lines = itp_path.read_text().splitlines()
-    new_lines = []
-
-    section = None
-
-    for line in lines:
-        stripped = line.strip()
-
-        if stripped.startswith("["):
-            section = stripped.lower()
-
-        # --- Dihedrals only ---
-        if section == "[dihedrals]" and stripped and not stripped.startswith(";"):
-            parts = re.split(r"\s+", stripped)
-            if len(parts) >= 7:
-                try:
-                    k = float(parts[6])
-                    parts[6] = f"{k * 0.2:.2f}"  # 70% softer
-                    line = "   " + "   ".join(parts)
-                except ValueError:
-                    pass
-
-        new_lines.append(line)
-
-    itp_path.write_text("\n".join(new_lines) + "\n")
-    print("[patch] Reduced dihedral force constants to 10%")
-
 import re
 from pathlib import Path
-
 
 def patch_ligand(
     itp_path: Path,
@@ -2214,7 +2176,7 @@ def main(argv=None) -> None:
             orth_itp,
             bond_factor=1.0,
             angle_factor=1.0,
-            dihedral_factor=1.0,
+            dihedral_factor=0.5,
             bond_k_min=0.0,
             angle_k_min=0.0,
             dihedral_k_min=0.0,
@@ -2257,7 +2219,7 @@ def main(argv=None) -> None:
                 orth_itp,
                 bond_factor=1,
                 angle_factor=1,
-                dihedral_factor=1.0,
+                dihedral_factor=0.5,
                 bond_k_min=0,
                 angle_k_min=0,
                 dihedral_k_min=0,
@@ -2355,14 +2317,6 @@ def main(argv=None) -> None:
         step_grompp_mdrun_nvt(cfg, nt=args.nt)
         step_grompp_mdrun_npt(cfg, nt=args.nt)
         step_grompp_mdrun_md(cfg, nt=args.nt)
-        if preset == "m3_popc_full":
-            print("\n=== FULL PRESET: EM → NVT → NPT → MD ===")
-            step_grompp_mdrun_em(cfg, nt=args.nt)
-            step_grompp_mdrun_nvt(cfg, nt=args.nt)
-            step_grompp_mdrun_npt(cfg, nt=args.nt)
-            step_grompp_mdrun_md(cfg, nt=args.nt)
-            print("\nFULL PRESET FINISHED.")
-            return
         print("\nFULL PRESET FINISHED.")
         return
 
