@@ -55,7 +55,7 @@ async def create_md_job(
     protein_pdb: Optional[UploadFile] = File(None),
     preset: str = Form("cg_popc_50ns"),
     scenario: str = Form("protein_only"),
-    workflow: str = Form("build_only"),  # "build_only" | "equilibrate" | "full"
+    workflow: str = Form("build_only"),
     parent_job_id: Optional[str] = Form(None),
     md_ns: Optional[float] = Form(None),
     nt: int = Form(1),
@@ -64,6 +64,12 @@ async def create_md_job(
     ligand_case: str | None = Form(None),
     allosteric_pose: Optional[UploadFile] = File(None),
     comment: Optional[str] = Form(None),
+    ligand_rtf: Optional[UploadFile] = File(None),
+    ligand_g_rtf: Optional[UploadFile] = File(None),
+    ligand_prm: Optional[UploadFile] = File(None),
+    ligand_itp: Optional[UploadFile] = File(None),
+    ligand_coord_template: Optional[UploadFile] = File(None),
+    ligand_toppar: Optional[UploadFile] = File(None),
 ):
     return create_md_job_service(
         protein_pdb,
@@ -78,6 +84,12 @@ async def create_md_job(
         allosteric_pose,
         ligand_case,
         comment,
+        ligand_rtf,
+        ligand_g_rtf,
+        ligand_prm,
+        ligand_itp,
+        ligand_coord_template,
+        ligand_toppar,
     )
 
 

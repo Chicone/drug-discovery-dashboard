@@ -59,6 +59,12 @@ def create_md_job_service(
     allosteric_pose,
     ligand_case=None,
     comment=None,
+    ligand_rtf=None,
+    ligand_g_rtf=None,
+    ligand_prm=None,
+    ligand_itp=None,
+    ligand_coord_template=None,
+    ligand_toppar=None,
 ):
     """
     This function contains EXACTLY the logic currently in md.py:create_md_job,
@@ -268,6 +274,12 @@ def create_md_job_service(
             with open(pdb_path, "wb") as f:
                 shutil.copyfileobj(protein_pdb.file, f)
 
+            original_name = Path(protein_pdb.filename).name
+            original_complex_path = input_dir / original_name
+
+            protein_pdb.file.seek(0)
+            with open(original_complex_path, "wb") as f:
+                shutil.copyfileobj(protein_pdb.file, f)
         orth_path = None
         orth_extracted = False
         extract_summary = None
@@ -317,6 +329,50 @@ def create_md_job_service(
             allosteric_pose.file.seek(0)
             with open(allo_path, "wb") as f:
                 shutil.copyfileobj(allosteric_pose.file, f)
+
+        ligand_rtf_path = None
+        if ligand_rtf is not None:
+            ligand_rtf_path = input_dir / Path(ligand_rtf.filename).name
+            ligand_rtf.file.seek(0)
+            with open(ligand_rtf_path, "wb") as f:
+                shutil.copyfileobj(ligand_rtf.file, f)
+
+        ligand_g_rtf_path = None
+        if ligand_g_rtf is not None:
+            ligand_g_rtf_path = input_dir / Path(ligand_g_rtf.filename).name
+            ligand_g_rtf.file.seek(0)
+            with open(ligand_g_rtf_path, "wb") as f:
+                shutil.copyfileobj(ligand_g_rtf.file, f)
+
+        ligand_prm_path = None
+        if ligand_prm is not None:
+            ligand_prm_path = input_dir / Path(ligand_prm.filename).name
+            ligand_prm.file.seek(0)
+            with open(ligand_prm_path, "wb") as f:
+                shutil.copyfileobj(ligand_prm.file, f)
+
+        ligand_itp_path = None
+        if ligand_itp is not None:
+            ligand_itp_path = input_dir / Path(ligand_itp.filename).name
+            ligand_itp.file.seek(0)
+            with open(ligand_itp_path, "wb") as f:
+                shutil.copyfileobj(ligand_itp.file, f)
+
+        ligand_coord_template_path = None
+        if ligand_coord_template is not None:
+            ligand_coord_template_path = (
+                    input_dir / Path(ligand_coord_template.filename).name
+            )
+            ligand_coord_template.file.seek(0)
+            with open(ligand_coord_template_path, "wb") as f:
+                shutil.copyfileobj(ligand_coord_template.file, f)
+
+        ligand_toppar_path = None
+        if ligand_toppar is not None:
+            ligand_toppar_path = input_dir / Path(ligand_toppar.filename).name
+            ligand_toppar.file.seek(0)
+            with open(ligand_toppar_path, "wb") as f:
+                shutil.copyfileobj(ligand_toppar.file, f)
 
         created_at = datetime.now(
             ZoneInfo("Europe/Paris")
@@ -369,8 +425,19 @@ def create_md_job_service(
             },
             "files": {
                 "protein_pdb": "protein.pdb",
-                "orthosteric_ligand": orth_path.name if orth_path else None,
+                "complex_pdb": (
+                    orth_path.name if orth_path is not None
+                    else (protein_pdb.filename if protein_pdb is not None else None)
+                ),                "orthosteric_ligand": orth_path.name if orth_path else None,
                 "allosteric_pose": allo_path.name if allo_path else None,
+                "ligand_rtf": ligand_rtf_path.name if ligand_rtf_path else None,
+                "ligand_g_rtf": ligand_g_rtf_path.name if ligand_g_rtf_path else None,
+                "ligand_prm": ligand_prm_path.name if ligand_prm_path else None,
+                "ligand_itp": ligand_itp_path.name if ligand_itp_path else None,
+                "ligand_coord_template": (
+                    ligand_coord_template_path.name if ligand_coord_template_path else None
+                ),
+                "ligand_toppar": ligand_toppar_path.name if ligand_toppar_path else None,
             },
             "comment": comment
         }
@@ -1006,10 +1073,18 @@ def create_backmap_job(
 ):
     """
     Create a child AA-reconstruction job from an existing CG/MD job.
-    Uses trajectory extraction if available, otherwise falls back to static system.gro.
+
+    Main idea:
+    - copy the parent simulation outputs needed for frame extraction
+    - copy the original input files needed for AA reconstruction
+    - write a new child params.json for aa_pipeline.py
+    - launch the AA child job
     """
 
     try:
+        # -------------------------------------------------
+        # 1) Validate parent job
+        # -------------------------------------------------
         parent_dir = _md_job_dir(parent_job_id)
         if not parent_dir.exists():
             return JSONResponse(
@@ -1021,11 +1096,16 @@ def create_backmap_job(
         if not parent_out.exists():
             return JSONResponse(
                 status_code=400,
-                content={"error": f"Parent job has no out/ directory: {parent_job_id}"},
+                content={
+                    "error": f"Parent job has no out/ directory: {parent_job_id}"
+                },
             )
 
         MD_RUNS_DIR.mkdir(parents=True, exist_ok=True)
 
+        # -------------------------------------------------
+        # 2) Create child AA job directories
+        # -------------------------------------------------
         job_id = f"aa_{uuid.uuid4().hex[:12]}"
         job_dir = _md_job_dir(job_id)
         job_dir.mkdir(exist_ok=False)
@@ -1036,7 +1116,12 @@ def create_backmap_job(
         _safe_mkdir(out_dir)
 
         # -------------------------------------------------
-        # Copy candidate parent files needed for AA reconstruction
+        # 3) Copy parent simulation outputs needed by aa_pipeline.py
+        #
+        # These are used later to:
+        # - extract a frame from the CG trajectory
+        # - find the matching TPR
+        # - keep topology/trajectory context in the child job
         # -------------------------------------------------
         files_to_copy = [
             "system.gro",
@@ -1060,20 +1145,25 @@ def create_backmap_job(
             if src.exists():
                 shutil.copy2(src, out_dir / fname)
 
-        # Copy all ITPs from parent out/
+        # Copy all topology include files
         for itp in parent_out.glob("*.itp"):
             shutil.copy2(itp, out_dir / itp.name)
 
-        # Copy trajectory parts too
+        # Copy all trajectory files
         for xtc in parent_out.glob("*.xtc"):
             shutil.copy2(xtc, out_dir / xtc.name)
 
         # -------------------------------------------------
-        # Decide whether we have a trajectory
+        # 4) Decide which trajectory/static structure the child will use
+        #
+        # best_xtc:
+        #   preferred trajectory file for frame extraction
+        #
+        # static_gro:
+        #   fallback static structure if no trajectory exists
         # -------------------------------------------------
         xtc_candidates = sorted(parent_out.glob("md.part*.xtc"))
         if xtc_candidates:
-            # highest md.partXXXX.xtc
             def part_index(path: Path) -> int:
                 m = re.search(r"\.part(\d+)\.", path.name)
                 return int(m.group(1)) if m else -1
@@ -1095,9 +1185,14 @@ def create_backmap_job(
         if best_xtc is None and static_gro is None:
             return JSONResponse(
                 status_code=400,
-                content={"error": "Parent job has neither trajectory nor usable .gro"},
+                content={
+                    "error": "Parent job has neither trajectory nor usable .gro"
+                },
             )
 
+        # -------------------------------------------------
+        # 5) Write child metadata so frontend can see the job immediately
+        # -------------------------------------------------
         created_at = datetime.now(
             ZoneInfo("Europe/Paris")
         ).isoformat(timespec="seconds")
@@ -1119,6 +1214,203 @@ def create_backmap_job(
         _write_json(job_dir / "status.json", {"status": "queued"})
         (job_dir / "log.txt").write_text("", encoding="utf-8")
 
+        # -------------------------------------------------
+        # 6) Recover the parent input files needed for AA reconstruction
+        #
+        # We need:
+        # - protein.pdb      -> protein-only PDB for pdb2gmx
+        # - complex_pdb      -> original docked protein+ligand complex
+        # - NECA.smi         -> ligand chemistry
+        #
+        # For older jobs:
+        # - complex_pdb may not be stored in parent params.json
+        # - NECA.smi may not exist physically, but orthosteric_smiles may exist
+        # -------------------------------------------------
+        parent_input = parent_dir / "input"
+
+        # Protein-only PDB
+        parent_protein_pdb = parent_input / "protein.pdb"
+        if not parent_protein_pdb.exists():
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": (
+                        f"Parent job is missing input/protein.pdb: "
+                        f"{parent_job_id}"
+                    )
+                },
+            )
+
+        child_protein_pdb = input_dir / "protein.pdb"
+        shutil.copy2(parent_protein_pdb, child_protein_pdb)
+
+        # Parent params.json
+        parent_params_path = parent_input / "params.json"
+        if not parent_params_path.exists():
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": (
+                        f"Parent job is missing input/params.json: "
+                        f"{parent_job_id}"
+                    )
+                },
+            )
+
+        parent_params = json.loads(parent_params_path.read_text())
+        parent_files = parent_params.get("files", {})
+
+        parent_ligand_rtf_name = parent_files.get("ligand_rtf")
+        parent_ligand_g_rtf_name = parent_files.get("ligand_g_rtf")
+        parent_ligand_prm_name = parent_files.get("ligand_prm")
+
+        child_ligand_rtf = None
+        if parent_ligand_rtf_name:
+            src = parent_input / parent_ligand_rtf_name
+            if not src.exists():
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": f"Parent job is missing input/{parent_ligand_rtf_name}: {parent_job_id}"},
+                )
+            child_ligand_rtf = input_dir / src.name
+            shutil.copy2(src, child_ligand_rtf)
+
+        child_ligand_g_rtf = None
+        if parent_ligand_g_rtf_name:
+            src = parent_input / parent_ligand_g_rtf_name
+            if not src.exists():
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": f"Parent job is missing input/{parent_ligand_g_rtf_name}: {parent_job_id}"},
+                )
+            child_ligand_g_rtf = input_dir / src.name
+            shutil.copy2(src, child_ligand_g_rtf)
+
+        child_ligand_prm = None
+        if parent_ligand_prm_name:
+            src = parent_input / parent_ligand_prm_name
+            if not src.exists():
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": f"Parent job is missing input/{parent_ligand_prm_name}: {parent_job_id}"},
+                )
+            child_ligand_prm = input_dir / src.name
+            shutil.copy2(src, child_ligand_prm)
+
+        parent_ligand_itp_name = parent_files.get("ligand_itp")
+        child_ligand_itp = None
+
+        if parent_ligand_itp_name:
+            src = parent_input / parent_ligand_itp_name
+            if not src.exists():
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "error": f"Parent job is missing input/{parent_ligand_itp_name}: {parent_job_id}"
+                    },
+                )
+            child_ligand_itp = input_dir / src.name
+            shutil.copy2(src, child_ligand_itp)
+
+        parent_ligand_coord_template_name = parent_files.get("ligand_coord_template")
+        child_ligand_coord_template = None
+
+        if parent_ligand_coord_template_name:
+            src = parent_input / parent_ligand_coord_template_name
+            if not src.exists():
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "error": (
+                            f"Parent job is missing input/"
+                            f"{parent_ligand_coord_template_name}: "
+                            f"{parent_job_id}"
+                        )
+                    },
+                )
+            child_ligand_coord_template = input_dir / src.name
+            shutil.copy2(src, child_ligand_coord_template)
+
+        parent_ligand_toppar_name = parent_files.get("ligand_toppar")
+        child_ligand_toppar = None
+
+        if parent_ligand_toppar_name:
+            src = parent_input / parent_ligand_toppar_name
+            if not src.exists():
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "error": (
+                            f"Parent job is missing input/"
+                            f"{parent_ligand_toppar_name}: "
+                            f"{parent_job_id}"
+                        )
+                    },
+                )
+            child_ligand_toppar = input_dir / src.name
+            shutil.copy2(src, child_ligand_toppar)
+
+        # Ligand SMILES:
+        # Build a generic ligand.smi from the smiles string stored in parent params.json
+        parent_smiles = parent_params.get("orthosteric_smiles")
+        if not parent_smiles:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": (
+                        f"Parent job is missing orthosteric_smiles in params.json: "
+                        f"{parent_job_id}"
+                    )
+                },
+            )
+
+        child_smiles_path = input_dir / "ligand.smi"
+        child_smiles_path.write_text(
+            parent_smiles.strip() + "\n",
+            encoding="utf-8",
+        )
+
+        # Original docked complex PDB
+        # Preferred: explicit files.complex_pdb
+        # Fallback for older jobs: search for *complex*.pdb in parent input/
+        parent_complex_name = parent_files.get("complex_pdb")
+
+        if not parent_complex_name:
+            for candidate in parent_input.glob("*complex*.pdb"):
+                parent_complex_name = candidate.name
+                break
+
+        if not parent_complex_name:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": (
+                        f"Could not find a complex PDB in parent input/ for job "
+                        f"{parent_job_id}"
+                    )
+                },
+            )
+
+        parent_complex_pdb = parent_input / parent_complex_name
+        if not parent_complex_pdb.exists():
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": (
+                        f"Parent job is missing input/{parent_complex_name}: "
+                        f"{parent_job_id}"
+                    )
+                },
+            )
+
+        child_complex_pdb = input_dir / parent_complex_pdb.name
+        shutil.copy2(parent_complex_pdb, child_complex_pdb)
+
+        # -------------------------------------------------
+        # 7) Write the AA child params.json
+        #
+        # aa_pipeline.py reads these fields directly.
+        # -------------------------------------------------
         params = {
             "workflow": "backmap_aa",
             "parent_job_id": parent_job_id,
@@ -1129,12 +1421,27 @@ def create_backmap_job(
             "source_xtc": best_xtc,
             "source_static_gro": static_gro,
             "source_tpr": "md.tpr" if (parent_out / "md.tpr").exists() else None,
+            "protein_pdb": str(child_protein_pdb),
+            "complex_pdb": str(child_complex_pdb),
+            "ligand_smiles": str(child_smiles_path),
+            "ligand_resname": "UNL",
+            "ligand_rtf": str(child_ligand_rtf) if child_ligand_rtf else None,
+            "ligand_g_rtf": str(child_ligand_g_rtf) if child_ligand_g_rtf else None,
+            "ligand_prm": str(child_ligand_prm) if child_ligand_prm else None,
+            "ligand_itp": str(child_ligand_itp) if child_ligand_itp else None,
+            "ligand_coord_template": (
+                str(child_ligand_coord_template) if child_ligand_coord_template else None
+            ),
+            "ligand_toppar": str(child_ligand_toppar) if child_ligand_toppar else None,
             "comment": f"AA reconstruction from parent {parent_job_id}",
-            "jop_type": "aa"
+            "jop_type": "aa",
         }
 
         _write_json(input_dir / "params.json", params)
 
+        # -------------------------------------------------
+        # 8) Launch the AA pipeline
+        # -------------------------------------------------
         try:
             _launch_md_local(job_dir)
             _write_json(job_dir / "status.json", {"status": "running"})
@@ -1147,7 +1454,10 @@ def create_backmap_job(
                 f"Traceback:\n{tb}\n",
                 encoding="utf-8",
             )
-            _write_json(job_dir / "status.json", {"status": "error", "error": str(e)})
+            _write_json(
+                job_dir / "status.json",
+                {"status": "error", "error": str(e)},
+            )
             return JSONResponse(
                 status_code=500,
                 content={"error": f"Failed to launch AA backmap job: {e}"},
@@ -1157,7 +1467,6 @@ def create_backmap_job(
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
-
 
 
 

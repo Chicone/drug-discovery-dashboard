@@ -40,8 +40,15 @@ function MolecularDynamics() {
   const [orthostericSmiles, setOrthostericSmiles] = useState(DEFAULT_SMILES);
   const [ligandCase, setLigandCase] = useState("default");
   const [smilesFileName, setSmilesFileName] = useState(null);
-
-  const smilesInputRef = useRef(null);
+  const ligandFolderInputRef = useRef(null);   // ADD THIS
+  const [ligandFolderFiles, setLigandFolderFiles] = useState({
+    smi: null,
+    rtf: null,
+    gRtf: null,
+    prm: null,
+    itp: null,
+    coordTemplate: null,
+  });
 
   // Scenario selector
   const [scenario, setScenario] = useState("protein_plus_orthosteric_membrane");
@@ -296,59 +303,12 @@ async function openChimera(jobId) {
 }
 
 
-async function createAaReconstructionJob() {
-  const parentId = selectedParentJobId || jobId;
-
-  if (!parentId) {
-    setError("Please select a parent MD job first.");
-    return;
-  }
-
-  setError(null);
-  setIsBackmapping(true);
-
-  try {
-    const res = await fetch(`/api/md/${parentId}/backmap`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        time_ps: Number(aaTimePs),
-        run_em: aaRunEm,
-        run_nvt: aaRunNvt,
-        run_npt: aaRunNpt,
-      }),
-    });
-
-    if (!res.ok) {
-      const txt = await res.text();
-      throw new Error(txt || `Failed to start AA reconstruction (${res.status})`);
-    }
-
-    const data = await res.json();
-
-    if (!data?.job_id) {
-      throw new Error("Backend did not return a job_id.");
-    }
-
-    openJob(data.job_id);
-    loadRecentJobs(historyLimit);
-
-  } catch (e) {
-    setError(e.message || String(e));
-  } finally {
-    setIsBackmapping(false);
-  }
-}
-
-
-  function workflowFromRunPreset(preset) {
+function workflowFromRunPreset(preset) {
     if (!preset.includes("_prod_")) {
       throw new Error(`Invalid run preset: ${preset}`);
     }
     return "run_md";
-  }
+}
 
 function appendLog(chunk) {
   const el = logRef.current;
@@ -450,7 +410,29 @@ async function submitJob({ preset, workflow, parentJobId = null }) {
       }
     }
 
+    if (ligandFolderFiles.rtf) {
+      form.append("ligand_rtf", ligandFolderFiles.rtf);
+    }
 
+    if (ligandFolderFiles.gRtf) {
+      form.append("ligand_g_rtf", ligandFolderFiles.gRtf);
+    }
+
+    if (ligandFolderFiles.prm) {
+      form.append("ligand_prm", ligandFolderFiles.prm);
+    }
+
+    if (ligandFolderFiles.itp) {
+      form.append("ligand_itp", ligandFolderFiles.itp);
+    }
+
+    if (ligandFolderFiles.coordTemplate) {
+      form.append("ligand_coord_template", ligandFolderFiles.coordTemplate);
+    }
+
+    if (ligandFolderFiles.toppar) {
+      form.append("ligand_toppar", ligandFolderFiles.toppar);
+    }
 
     if (allostericPoseFile) {
       form.append("allosteric_pose", allostericPoseFile);
@@ -682,36 +664,59 @@ async function createRunJob() {
     setAllostericPoseFile(f);
   }
 
-  function onPickSmilesFile(e) {
-  const file = e.target.files?.[0];
-  if (!file) return;
+function onPickLigandFolder(e) {
+  const files = Array.from(e.target.files || []);
+  if (files.length === 0) return;
 
-  setSmilesFileName(file.name);
+  const findByName = (suffix) =>
+    files.find((f) => f.name.toLowerCase() === suffix.toLowerCase()) || null;
 
-  const name = file.name.toLowerCase();
+  const smiFile =
+    files.find((f) => /\.(smi|smiles|txt)$/i.test(f.name)) || null;
 
-  const caseKey = name
-    .replace(/\.[^/.]+$/, "")
-    .trim()
-    .replace(/\s/g, "_");
+  const rtfFile = findByName("unl.rtf");
+  const gRtfFile = findByName("unl_g.rtf");
+  const prmFile = findByName("unl.prm");
+  const itpFile = findByName("unl.itp");
+  const topparFile = findByName("toppar.str");
+  const coordTemplateFile = findByName("ligandrm.pdb");
 
-  setLigandCase(caseKey || "default");
+  setLigandFolderFiles({
+    smi: smiFile,
+    rtf: rtfFile,
+    gRtf: gRtfFile,
+    prm: prmFile,
+    itp: itpFile,
+    toppar: topparFile,
+    coordTemplate: coordTemplateFile,
+  });
 
-  const reader = new FileReader();
-  reader.onload = (event) => {
-    const text = event.target.result || "";
-    const lines = text
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean);
+  setSmilesFileName(smiFile ? smiFile.name : null);
 
-    if (lines.length === 0) return;
+  if (smiFile) {
+    const name = smiFile.name.toLowerCase();
+    const caseKey = name
+      .replace(/\.[^/.]+$/, "")
+      .trim()
+      .replace(/\s/g, "_");
 
-    const smiles = lines[0].split(/\s+/)[0];
-    setOrthostericSmiles(smiles);
-  };
+    setLigandCase(caseKey || "default");
 
-  reader.readAsText(file);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target.result || "";
+      const lines = text
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean);
+
+      if (lines.length === 0) return;
+
+      const smiles = lines[0].split(/\s+/)[0];
+      setOrthostericSmiles(smiles);
+    };
+    reader.readAsText(smiFile);
+  }
 }
 
 const canBackmap =
@@ -720,15 +725,15 @@ const canBackmap =
   Number.isFinite(Number(aaTimePs)) &&
   Number(aaTimePs) >= 0;
 
-  const canSubmit =
-    (!needsProtein || !!proteinFile) &&
-    (!needsOrth || (!!orthostericFile && !!orthostericSmiles?.trim())) &&
-    (!needsAllo || !!allostericPoseFile) &&
-    !isSubmitting;
+const canSubmit =
+  (!needsProtein || !!proteinFile) &&
+  (!needsOrth || (!!orthostericFile && !!orthostericSmiles?.trim())) &&
+  (!needsAllo || !!allostericPoseFile) &&
+  !isSubmitting;
 
-  const runningCount = useMemo(() => {
-    return recentJobs.filter(j => j.status === "running").length;
-  }, [recentJobs]);
+const runningCount = useMemo(() => {
+  return recentJobs.filter(j => j.status === "running").length;
+}, [recentJobs]);
 
 
 return (
@@ -1045,14 +1050,14 @@ return (
             />
 
             <input
-              ref={smilesInputRef}
+              ref={ligandFolderInputRef}
               type="file"
-              accept=".smi,.smiles,.txt"
+              webkitdirectory="true"
+              directory=""
+              multiple
               style={{ display: "none" }}
-              onChange={onPickSmilesFile}
+              onChange={onPickLigandFolder}
             />
-
-
 
           </Stack>
 
@@ -1063,11 +1068,11 @@ return (
     variant="outlined"
     color="secondary"
     size="small"
-    onClick={() => smilesInputRef.current?.click()}
+    onClick={() => ligandFolderInputRef.current?.click()}
     sx={{ maxWidth: 200 }}
   >
-    Load SMILES (.smi)
-  </Button>
+  Load ligand folder
+</Button>
 
   {smilesFileName && (
     <Typography
@@ -1084,6 +1089,51 @@ return (
         sx={{ color: "#aaa", display: "block", mt: 0.5 }}
       >
         SMILES: {smilesFileName}
+      </Typography>
+    )}
+
+    {ligandFolderFiles.rtf && (
+      <Typography
+        variant="caption"
+        sx={{ color: "#aaa", display: "block", mt: 0.5 }}
+      >
+        RTF: {ligandFolderFiles.rtf.name}
+      </Typography>
+    )}
+
+    {ligandFolderFiles.gRtf && (
+      <Typography
+        variant="caption"
+        sx={{ color: "#aaa", display: "block", mt: 0.5 }}
+      >
+        GRTF: {ligandFolderFiles.gRtf.name}
+      </Typography>
+    )}
+
+    {ligandFolderFiles.prm && (
+      <Typography
+        variant="caption"
+        sx={{ color: "#aaa", display: "block", mt: 0.5 }}
+      >
+        PRM: {ligandFolderFiles.prm.name}
+      </Typography>
+    )}
+
+    {ligandFolderFiles.itp && (
+      <Typography
+        variant="caption"
+        sx={{ color: "#aaa", display: "block", mt: 0.5 }}
+      >
+        ITP: {ligandFolderFiles.itp.name}
+      </Typography>
+    )}
+
+    {ligandFolderFiles.coordTemplate && (
+      <Typography
+        variant="caption"
+        sx={{ color: "#aaa", display: "block", mt: 0.5 }}
+      >
+        Template: {ligandFolderFiles.coordTemplate.name}
       </Typography>
     )}
 
