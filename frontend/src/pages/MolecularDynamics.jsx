@@ -48,6 +48,7 @@ function MolecularDynamics() {
     prm: null,
     itp: null,
     coordTemplate: null,
+    toppar: null,
   });
 
   // Scenario selector
@@ -668,18 +669,39 @@ function onPickLigandFolder(e) {
   const files = Array.from(e.target.files || []);
   if (files.length === 0) return;
 
-  const findByName = (suffix) =>
-    files.find((f) => f.name.toLowerCase() === suffix.toLowerCase()) || null;
+  const findExact = (name) =>
+    files.find((f) => f.name.toLowerCase() === name.toLowerCase()) || null;
+
+  const findByExt = (ext) =>
+    files.find((f) => f.name.toLowerCase().endsWith(ext.toLowerCase())) || null;
 
   const smiFile =
     files.find((f) => /\.(smi|smiles|txt)$/i.test(f.name)) || null;
 
-  const rtfFile = findByName("unl.rtf");
-  const gRtfFile = findByName("unl_g.rtf");
-  const prmFile = findByName("unl.prm");
-  const itpFile = findByName("unl.itp");
-  const topparFile = findByName("toppar.str");
-  const coordTemplateFile = findByName("ligandrm.pdb");
+  // Prefer converted GROMACS files
+  const itpFile =
+    findExact("ligandrm.itp") ||
+    files.find((f) => /\.itp$/i.test(f.name) && f.name.toLowerCase() !== "unl.itp") ||
+    findExact("unl.itp") ||
+    null;
+
+  const prmFile =
+    findExact("ligandrm.prm") ||
+    files.find((f) => /\.prm$/i.test(f.name) && f.name.toLowerCase() !== "unl.prm") ||
+    findExact("unl.prm") ||
+    null;
+
+  const coordTemplateFile =
+    findExact("ligandrm_ini.pdb") ||
+    files.find((f) => /\.pdb$/i.test(f.name) && f.name.toLowerCase().includes("_ini")) ||
+    findExact("ligandrm.pdb") ||
+    files.find((f) => /\.pdb$/i.test(f.name)) ||
+    null;
+
+  // Old CHARMM files only as fallback
+  const rtfFile = findExact("unl.rtf") || findByExt(".rtf");
+  const gRtfFile = findExact("unl_g.rtf") || null;
+  const topparFile = findExact("toppar.str") || null;
 
   setLigandFolderFiles({
     smi: smiFile,
@@ -687,8 +709,8 @@ function onPickLigandFolder(e) {
     gRtf: gRtfFile,
     prm: prmFile,
     itp: itpFile,
-    toppar: topparFile,
     coordTemplate: coordTemplateFile,
+    toppar: topparFile,
   });
 
   setSmilesFileName(smiFile ? smiFile.name : null);

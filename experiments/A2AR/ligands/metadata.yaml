@@ -1,0 +1,20 @@
+name: NECA
+full_name: 5'-N-ethylcarboxamidoadenosine
+role: orthosteric_agonist
+
+target:
+  receptor: A2AR
+  binding_site: orthosteric
+
+chemistry:
+  smiles_file: NECA.smi
+  expected_charge: 0
+  protonation_state: physiological
+
+docking:
+  preferred_box: orthosteric
+
+md:
+  forcefield: martini3
+  notes: >
+    Reference orthosteric agonist commonly used for A2AR.
