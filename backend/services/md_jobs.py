@@ -1424,7 +1424,7 @@ def create_backmap_job(
             "protein_pdb": str(child_protein_pdb),
             "complex_pdb": str(child_complex_pdb),
             "ligand_smiles": str(child_smiles_path),
-            "ligand_resname": "UNL",
+            "ligand_resname": "ligandrm.pdb",
             "ligand_rtf": str(child_ligand_rtf) if child_ligand_rtf else None,
             "ligand_g_rtf": str(child_ligand_g_rtf) if child_ligand_g_rtf else None,
             "ligand_prm": str(child_ligand_prm) if child_ligand_prm else None,

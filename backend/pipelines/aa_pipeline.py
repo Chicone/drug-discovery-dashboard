@@ -136,7 +136,7 @@ def main():
 
     params = json.loads(params_path.read_text())
 
-    enable_ligand = False
+    enable_ligand = True
 
     parent_job_id = params["parent_job_id"]
     time_ps = params.get("time_ps", 0.0)
@@ -216,7 +216,7 @@ def main():
         complex_pdb=complex_pdb,
         protein_out=extracted_protein_pdb,
         ligand_out=extracted_ligand_pdb,
-        ligand_resname=params.get("ligand_resname"),
+        ligand_resname="UNL",
     )
 
     result["extracted_protein_pdb"] = str(extracted_protein_pdb)
@@ -226,7 +226,7 @@ def main():
     aa_info = prepare_aa_system(
         aa_job_out_dir=out_dir,
         protein_pdb=extracted_protein_pdb,
-        forcefield=params.get("forcefield", "charmm36-jul2022"),
+        forcefield=params.get("forcefield", "charmm36-feb2026_cgenff-5.0"),
         water_model=params.get("water_model", "tip3p"),
     )
 
@@ -259,7 +259,7 @@ def main():
         aa_job_out_dir=out_dir,
         ligand_pdb=extracted_ligand_pdb,
         ligand_smiles=ligand_smiles,
-        ligand_name=params.get("ligand_resname", "UNL"),
+        ligand_name=params.get("ligand_resname", "ligandrm.pdb"),
         ligand_itp=ligand_itp,
         ligand_rtf=ligand_rtf,
         ligand_g_rtf=ligand_g_rtf,
@@ -310,11 +310,11 @@ def main():
             topol_top=Path(aa_info["topol_top"]),
             ligand_coord_template=Path(ligand_info["ligand_coord_template"]),
             ligand_itp=Path(ligand_info["ligand_itp"]),
-            ligand_toppar=(
-                Path(ligand_info["ligand_toppar"])
-                if ligand_info.get("ligand_toppar") is not None else None
+            ligand_prm=(
+                Path(ligand_info["ligand_prm"])
+                if ligand_info["ligand_prm"] is not None else None
             ),
-            ligand_resname=params.get("ligand_resname", "UNL"),
+            ligand_resname="ligandrm.pdb",
         )
 
         result["complex_gro"] = str(integration_info["complex_gro"])

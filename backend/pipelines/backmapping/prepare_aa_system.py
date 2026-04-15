@@ -229,18 +229,12 @@ def prepare_ligand_topology(
 def _insert_ligand_include_into_topol(
     topol_top: Path,
     ligand_itp_name: str = "ligand.itp",
-    ligand_toppar_name: str | None = None,
 ) -> None:
-    """
-    Ensure topol.top uses a local posre.itp include and includes
-    ligand parameter files before ligand.itp, all before [ system ].
-    """
     lines = topol_top.read_text(encoding="utf-8").splitlines()
 
     normalized = []
     found_posre = False
     found_ligand = False
-    found_toppar = False
 
     for line in lines:
         stripped = line.strip()
@@ -253,55 +247,48 @@ def _insert_ligand_include_into_topol(
         if stripped == f'#include "{ligand_itp_name}"':
             found_ligand = True
 
-        if ligand_toppar_name is not None and stripped == f'#include "{ligand_toppar_name}"':
-            found_toppar = True
-
         normalized.append(line)
 
     lines = normalized
 
-    # Ensure local posre.itp include exists
     if not found_posre:
-        inserted = False
         for i, line in enumerate(lines):
             if line.strip() == "#ifdef POSRES":
                 lines.insert(i + 1, '#include "posre.itp"')
-                inserted = True
                 break
 
-        if not inserted:
-            for i, line in enumerate(lines):
-                if line.strip().lower() == "[ system ]":
-                    lines.insert(i, '#include "posre.itp"')
-                    inserted = True
-                    break
-
-    # Build include block to insert before [ system ]
-    include_block = []
-
-    if ligand_toppar_name is not None and not found_toppar:
-        include_block.append(f'#include "{ligand_toppar_name}"')
-
     if not found_ligand:
-        include_block.append(f'#include "{ligand_itp_name}"')
-
-    if include_block:
         inserted = False
         for i, line in enumerate(lines):
             if line.strip().lower() == "[ system ]":
-                for j, inc in enumerate(include_block):
-                    lines.insert(i + j, inc)
+                lines.insert(i, f'#include "{ligand_itp_name}"')
                 inserted = True
                 break
 
         if not inserted:
             raise RuntimeError(
-                f"Could not find [ system ] block in {topol_top} "
-                f"to insert ligand include(s)"
+                f"Could not find [ system ] block in {topol_top}"
             )
 
     topol_top.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
+def _insert_ligand_prm_after_forcefield(
+    topol_top: Path,
+    ligand_prm_name: str = "ligand.prm",
+) -> None:
+    lines = topol_top.read_text(encoding="utf-8").splitlines()
+    include_line = f'#include "{ligand_prm_name}"'
+
+    if any(line.strip() == include_line for line in lines):
+        return
+
+    for i, line in enumerate(lines):
+        if "forcefield.itp" in line:
+            lines.insert(i + 1, include_line)
+            topol_top.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            return
+
+    raise RuntimeError("forcefield.itp include not found")
 
 def _append_ligand_to_molecules_block(
     topol_top: Path,
@@ -382,7 +369,7 @@ def integrate_ligand_into_aa_complex(
     topol_top: Path,
     ligand_coord_template: Path,
     ligand_itp: Path,
-    ligand_toppar: Path | None = None,
+    ligand_prm: Path | None = None,
     ligand_resname: str = "UNL",
 ) -> dict[str, Path]:
     """
@@ -394,28 +381,41 @@ def integrate_ligand_into_aa_complex(
     aa_build_dir = aa_job_out_dir / "aa_build"
     aa_build_dir.mkdir(parents=True, exist_ok=True)
 
+    # Stage ligand.itp
     staged_ligand_itp = aa_build_dir / "ligand.itp"
     if ligand_itp.resolve() != staged_ligand_itp.resolve():
         shutil.copy2(ligand_itp, staged_ligand_itp)
 
-    staged_ligand_toppar = None
-    if ligand_toppar is not None:
-        staged_ligand_toppar = aa_build_dir / "toppar.str"
-        if ligand_toppar.resolve() != staged_ligand_toppar.resolve():
-            shutil.copy2(ligand_toppar, staged_ligand_toppar)
+    # Stage ligand.prm (optional)
+    staged_ligand_prm = None
+    if ligand_prm is not None:
+        staged_ligand_prm = aa_build_dir / "ligand.prm"
+        if ligand_prm.resolve() != staged_ligand_prm.resolve():
+            shutil.copy2(ligand_prm, staged_ligand_prm)
 
     ligand_gro = aa_build_dir / "ligand.gro"
     complex_gro = aa_build_dir / "complex.gro"
 
+    # Insert ligand.prm near top of topol.top
+    if staged_ligand_prm is not None:
+        _insert_ligand_prm_after_forcefield(
+            topol_top,
+            ligand_prm_name="ligand.prm",
+        )
+
+    # Insert ligand.itp before [ system ]
     _insert_ligand_include_into_topol(
         topol_top,
         ligand_itp_name="ligand.itp",
-        ligand_toppar_name=(
-            staged_ligand_toppar.name if staged_ligand_toppar is not None else None
-        ),
     )
-    _append_ligand_to_molecules_block(topol_top, ligand_resname=ligand_resname)
 
+    # Add molecule count
+    _append_ligand_to_molecules_block(
+        topol_top,
+        ligand_resname=ligand_resname,
+    )
+
+    # Convert ligand coords
     _ligand_structure_to_gro(ligand_coord_template, ligand_gro)
 
     def _count_gro_atoms(gro_path: Path) -> int:
@@ -460,7 +460,7 @@ def integrate_ligand_into_aa_complex(
 
     return {
         "ligand_itp": staged_ligand_itp,
-        "ligand_toppar": staged_ligand_toppar,
+        "ligand_prm": staged_ligand_prm,
         "ligand_gro": ligand_gro,
         "complex_gro": complex_gro,
         "topol_top": topol_top,
