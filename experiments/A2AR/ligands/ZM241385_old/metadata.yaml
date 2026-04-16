@@ -1,0 +1,23 @@
+name: ZM241385
+role: orthosteric_antagonist
+
+target:
+  receptor: A2AR
+  binding_site: orthosteric
+
+chemistry:
+  smiles_file: zm241385.smi
+  expected_charge: 0
+  protonation_state: physiological
+
+docking:
+  preferred_box: orthosteric
+  notes: >
+    Docked in the canonical orthosteric binding site.
+    Uses the default orthosteric box defined at the receptor level.
+
+md:
+  forcefield: martini3
+  notes: >
+    Reference orthosteric antagonist used for comparison
+    against agonist-bound and apo states.
