@@ -1,23 +1,25 @@
-name: ZM241385
-role: orthosteric_antagonist
+ligand_name: ZM241385
+residue_name: ZM24
+source: CHARMM-GUI Ligand Reader & Modeler
+date_created: 2026-04-16
 
-target:
-  receptor: A2AR
-  binding_site: orthosteric
+canonical_files:
+  pdb: ZM241385.pdb
+  itp: ZM241385.itp
+  prm: ZM241385.prm
 
-chemistry:
-  smiles_file: zm241385.smi
-  expected_charge: 0
-  protonation_state: physiological
+original_download_files:
+  pdb: ligandrm.pdb
+  itp: ZM24.itp
+  prm: zm24.prm
+  archive: download.tgz
 
-docking:
-  preferred_box: orthosteric
-  notes: >
-    Docked in the canonical orthosteric binding site.
-    Uses the default orthosteric box defined at the receptor level.
+input_method: SMILES
 
-md:
-  forcefield: martini3
-  notes: >
-    Reference orthosteric antagonist used for comparison
-    against agonist-bound and apo states.
+smiles: "C1=COC(=C1)C2=NN3C(=NC(=NC3=N2)NCCC4=CC=C(C=C4)O)N"
+
+forcefield: CHARMM36 + CGenFF
+
+notes:
+  - Generated from CHARMM-GUI
+  - Intended for AA backmapping pipeline
