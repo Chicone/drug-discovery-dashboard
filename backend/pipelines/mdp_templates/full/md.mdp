@@ -16,7 +16,7 @@ nstvout             = 0
 nstfout             = 0
 nstenergy           = 5000
 nstlog              = 5000
-nstxout-compressed  = 20000
+nstxout-compressed  = 100000
 
 ; Neighbour searching
 cutoff-scheme       = Verlet
