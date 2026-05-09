@@ -537,7 +537,8 @@ def step_martinize(cfg: PipelineConfig) -> PipelineConfig:
         "-o", top_name,
         "-ff", "martini3001",
         "-elastic",
-        "-ef", "500",
+        "-ef", "250",
+        # "-ef", "500",
         "-eu", "0.7",
         "-el", "0.5",
          "-name", cfg.protein_name,
@@ -585,7 +586,8 @@ def step_insane(cfg: PipelineConfig) -> None:
         "-d", "1.2",
         # "-box", "15.0,15.0,17.0",
         # "-box", "16.0,16.0,22.0",
-        "-box","13.0,13.0,16.0",
+        # "-box","13.0,13.0,16.0",
+        "-box","11.0,11.0,12.0",
     ]
     run(cmd, cwd=cfg.workdir)
 
@@ -1910,7 +1912,7 @@ def build_pull_block(ps, stage):
         lines.append(f"pull_coord{i}_dim = Y Y Y")
         lines.append(f"pull_coord{i}_k = {k_list[i - 1]}")
         lines.append(f"pull_coord{i}_start = no")
-        lines.append(f"pull_coord{i}_init = 0")
+        lines.append(f"pull_coord{i}_init = 0.55") # not 0 to avoid overlap
         # lines.append(f"pull_coord{i}_start = yes")
 
         gid += 2
@@ -2217,13 +2219,14 @@ def main(argv=None) -> None:
             patch_virtual_site_masses(orth_itp)
             patch_ligand(
                 orth_itp,
-                bond_factor=1,
-                angle_factor=1,
+                bond_factor=1.0,
+                angle_factor=1.0,
                 dihedral_factor=0.5,
                 bond_k_min=0,
                 angle_k_min=0,
                 dihedral_k_min=0,
             )
+
             print("[CACHE] Patched Orthosteric.itp from cache.")
 
         if scenario != "ligand_water":
