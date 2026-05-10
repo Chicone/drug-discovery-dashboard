@@ -17,6 +17,6 @@ def predict_gnn(req: GNNPredictRequest):
 
     return {
         "smiles": req.smiles,
-        "model": "untrained_simple_gnn",
+        "model": "esol_gnn",
         "prediction": prediction,
     }
