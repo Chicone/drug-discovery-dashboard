@@ -6,9 +6,23 @@ from backend.routers.properties import router as properties_router
 from backend.routers.molecules import router as molecules_router
 from backend.routers.analysis import router as analysis_router
 from backend.routers.ai import router as ai_router
+from fastapi.middleware.cors import CORSMiddleware
 
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(md_router, prefix="/api/md")
 app.include_router(docking_router)

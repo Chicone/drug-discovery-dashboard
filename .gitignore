@@ -58,3 +58,4 @@ archive/pdb/
 
 *.xtc
 #*#
+backend/services/ai/checkpoints/*.pt
