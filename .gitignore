@@ -39,3 +39,23 @@ coverage/
 # Docking run history (generated at runtime)
 backend/data/docking_runs/
 
+# MD coarse-grain + equilibration data (runtime generated)
+backend/data/md_runs/
+backend/data/
+
+# Root-level runtime folders
+data/
+smiles/
+
+AutoMartini_M3/
+
+*.xtc
+archive/pdb/
+
+
+
+
+
+*.xtc
+#*#
+backend/services/ai/checkpoints/*.pt

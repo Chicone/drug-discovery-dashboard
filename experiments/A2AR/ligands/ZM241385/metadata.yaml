@@ -1,0 +1,25 @@
+ligand_name: ZM241385
+residue_name: ZM24
+source: CHARMM-GUI Ligand Reader & Modeler
+date_created: 2026-04-16
+
+canonical_files:
+  pdb: ZM241385.pdb
+  itp: ZM241385.itp
+  prm: ZM241385.prm
+
+original_download_files:
+  pdb: ligandrm.pdb
+  itp: ZM24.itp
+  prm: zm24.prm
+  archive: download.tgz
+
+input_method: SMILES
+
+smiles: "C1=COC(=C1)C2=NN3C(=NC(=NC3=N2)NCCC4=CC=C(C=C4)O)N"
+
+forcefield: CHARMM36 + CGenFF
+
+notes:
+  - Generated from CHARMM-GUI
+  - Intended for AA backmapping pipeline

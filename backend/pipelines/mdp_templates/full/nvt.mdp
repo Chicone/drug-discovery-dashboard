@@ -1,0 +1,63 @@
+; ================================
+;   Gentle NVT for Martini 3
+;   Purpose: stabilize fragile poses
+; ================================
+
+integrator              = md
+dt                      = 0.005      ; ultra-safe: 2 fs
+nsteps                  = 250000     ; 1.25 ns (adjust as needed)
+
+; Velocity generation (replica diversification)
+gen_vel  = yes
+gen_temp = 310
+;gen_seed = 12345     ; same random seed every time
+gen_seed = -1     ; new random seed every time
+
+; ----- Temperature control -----
+tcoupl                  = v-rescale
+tc-grps                 = System
+tau-t               = 1.0
+ref-t               = 310
+
+; ----- Pressure control ------
+pcoupl                  = no        ; NVT only
+
+; ----- Position restraints ----
+; Make sure your protein has #ifdef POSRES in the .top
+; and use "-DPOSRES" for VERY fragile cases.
+define                 = -DPOSRES
+
+; ----- Periodic boundary -----
+pbc                     = xyz
+
+; ----- Cutoffs (Martini 3 defaults) -----
+coulombtype             = reaction-field
+epsilon_rf              = 15
+rcoulomb                = 1.1
+vdw-type                = cutoff
+rvdw                    = 1.1
+
+; ----- Neighbour searching -----
+cutoff-scheme           = Verlet
+nstlist                 = 20
+ns_type                 = grid
+
+; ----- Constraints -----
+constraints             = h-bonds
+lincs-order = 8
+lincs-iter  = 2
+
+; ----- COM motion -----
+comm-mode               = Linear
+comm-grps               = System
+nstcomm = 500
+
+
+; ----- Output control -----
+nstxout-compressed      = 1000
+nstvout                 = 0
+nstenergy               = 500
+nstlog                  = 500
+
+; ================================
+

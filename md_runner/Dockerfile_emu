@@ -1,0 +1,30 @@
+FROM gromacs/gromacs:2022.2
+
+# Basic utilities + Python
+RUN apt-get update && apt-get install -y \
+    python3 python3-pip python3-venv \
+    git curl ca-certificates unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install martinize2 (Python package)
+RUN pip3 install --no-cache-dir vermouth
+
+# Install INSANE (membrane builder) from the upstream GitHub repo
+RUN pip3 install --no-cache-dir --force-reinstall \
+    git+https://github.com/Tsjerk/Insane.git
+
+# Get Martini 3 force field bundle (official tutorial link)
+RUN mkdir -p /opt/martini && \
+    curl -L --fail -o /opt/martini/martini_v300.zip \
+    https://cgmartini-library.s3.ca-central-1.amazonaws.com/1_Downloads/ff_parameters/martini3/martini_v300.zip && \
+    unzip -q /opt/martini/martini_v300.zip -d /opt/martini && \
+    rm /opt/martini/martini_v300.zip
+
+
+# Copy runner script
+COPY run.sh /opt/run.sh
+RUN chmod +x /opt/run.sh
+
+WORKDIR /job
+ENTRYPOINT ["/opt/run.sh"]
+

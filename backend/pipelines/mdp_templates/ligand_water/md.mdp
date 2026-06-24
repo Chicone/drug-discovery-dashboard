@@ -1,0 +1,52 @@
+; MARTINI 3 — PRODUCTION RUN (GPCR)
+integrator          = md
+dt                  = 0.01
+nsteps              = 10000000     ; 1.0 μs (adjust as needed)
+
+; Velocity generation (replica diversification)
+gen_vel             = no
+
+; *** NO POSITION RESTRAINTS ***
+define              =
+
+; Output control
+nstxout             = 0
+nstvout             = 0
+nstfout             = 0
+nstenergy           = 5000
+nstlog              = 5000
+nstxout-compressed  = 5000
+
+; Neighbour searching
+cutoff-scheme       = Verlet
+nstlist             = 20
+rlist               = 1.1
+rvdw                = 1.1
+rcoulomb            = 1.1
+
+; Electrostatics (Martini 3)
+coulomb-type        = reaction-field
+epsilon_rf          = 15
+
+; Temperature coupling — separate groups
+tcoupl              = v-rescale
+tc-grps             = W ORT ION
+tau-t               = 1.0 1.0 1.0
+ref-t               = 310 310 310
+
+; Pressure coupling — production quality
+pcoupl              = c-rescale          ; Better ensemble than Berendsen
+pcoupltype          = isotropic
+tau-p               = 12.0
+ref-p               = 1.0
+compressibility     = 3e-4
+
+; No restraint scaling required
+refcoord_scaling    = all
+
+pbc                 = xyz
+constraints         = none
+lincs_order = 8
+lincs_iter  = 1
+
+

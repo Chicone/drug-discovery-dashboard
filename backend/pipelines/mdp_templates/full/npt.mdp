@@ -1,0 +1,60 @@
+; MARTINI 3 — NPT Equilibration (GPCR-SAFE)
+integrator          = md
+dt                  = 0.005
+nsteps              = 1000000      ; 5 ns (good for membrane relaxation)
+
+gen_vel  = no
+
+; Position restraints remain ON
+define              = -DPOSRES
+
+; Output control
+nstxout      = 0
+nstvout      = 0
+nstfout      = 0
+nstxtcout    = 500
+nstenergy    = 5000
+nstlog       = 5000
+
+; Neighbour searching
+cutoff-scheme       = Verlet
+nstlist             = 20
+rlist               = 1.1
+rvdw                = 1.1
+
+; Electrostatics (Martini 3)
+coulomb-type        = reaction-field
+epsilon_rf          = 15
+rcoulomb            = 1.1
+
+; Temperature coupling
+tcoupl              = v-rescale
+tc-grps             = system
+tau-t               = 1.0
+ref-t               = 310
+;tc-grps            = Protein ORT POPC W ION
+;tau-t              = 2.0 2.0 2.0 2.0 2.0
+;ref-t              = 310 310 310 310 310
+
+; Pressure coupling (semi-isotropic)
+pcoupl              = berendsen
+pcoupltype          = semiisotropic
+tau-p               = 25.0
+ref-p               = 1.0 1.0
+compressibility     = 3e-4 3e-4
+refcoord_scaling = all
+
+; Box & PBC
+pbc                 = xyz
+
+; Constraints (Martini: none)
+; ----- Constraints -----
+constraints             = h-bonds
+lincs-order = 8
+lincs-iter  = 2
+
+; ----- COM motion -----
+comm-mode               = Linear
+comm-grps               = System
+nstcomm = 500
+

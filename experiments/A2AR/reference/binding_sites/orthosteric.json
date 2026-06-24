@@ -1,0 +1,10 @@
+{
+  "ligand_id": "orthosteric",
+  "ligand_alias": "canonical_orthosteric_site",
+  "source_pdb": "A2AR_AF_opm.pdb",
+  "box_center": [5.20, 1.89, -5.86],
+  "box_size": [20.0, 20.0, 20.0],
+  "units": "angstrom",
+  "method": "computed_from_binding_site_residues",
+  "padding": 10.0
+}
